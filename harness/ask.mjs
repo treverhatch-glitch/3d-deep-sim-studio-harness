@@ -1,26 +1,27 @@
 #!/usr/bin/env node
 /**
  * harness/ask.mjs — questions for the game dev, with a deadline and a default the Producer stands behind.
- *   npm run ask -- "<question>" --options "a,b,c" --default b --timeout 4h [--why "…"] [--by producer-1] [--task T-1]
- *   npm run ask -- answer A-001 "<option or words>" --by <name>
- *   npm run ask -- reverse A-001 "<option or words>" --by <name>   undo a decision made without you
+ *   npm run ask -- "<question>" --options "a,b,c" --default b --timeout 4h [--why "…"] [--by producer-1] [--task T-1] [--clear-when "disk>=50"]
+ *   npm run ask -- answer | reverse A-001 "<option or words>" --by <name>   (reverse undoes a decision made without you)
  *   npm run ask -- list [--open] | show A-001 | help | followed A-001 --task T-1 | --none "why" --by <name> (2.90)
  * A question shows under "Needs you" in every War Room view and in the Game plan. If nobody answers by the deadline, the
  * default is applied: logged as decision.timeout, written to studio/decisions/decided-without-you.md; the dev can reverse it.
  * Never on a timer: signing the Bible, changing pillars, bringing back a crossed-out layer, or deleting anything. An ask with
  * a --default and no --timeout gets STUDIO_ASK_TIMEOUT_H (4) hours; one that cannot decide itself is escalated once at
  * STUDIO_ASK_STALE_H (8) hours (ask.stale). The owner's own asks (harness/owner-acts.mjs) get no deadline.
+ * --clear-when "disk>=<GB>" (2.99): the ask closes by itself (cleared) once free disk is at least that many GB.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, emitEvent } from './event.mjs';
+import { REPO_ROOT, boardRoot, emitEvent } from './event.mjs';
 import { proxyShell } from './owner-proxy.mjs';
 import { betaActor } from './beta-mode.mjs';
 import { ownerOnlyTopic, ownerOnlyWhy, ownerOnlyReadAs } from './owner-acts.mjs';
 import { selfNamingShell, DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { logDecision } from './decisions-log.mjs';
 import { doneExit as out, flagOf, readJsonOrNull as read } from './helpers.mjs';
+import { freeDiskGb } from './janitor.mjs';
 
 export const ASKS_DIR = path.join(REPO_ROOT, 'studio', 'asks');
 const LOG = path.join(REPO_ROOT, 'studio', 'decisions', 'decided-without-you.md');
@@ -64,12 +65,17 @@ const hoursMs = (v, d) => { const s = String(v ?? '').trim(); if (/^(off|no|fals
 export const askTimeoutMs = (env = process.env) => hoursMs(env.STUDIO_ASK_TIMEOUT_H, 4);
 /** 2.85: STUDIO_ASK_STALE_H (8): when an ask that cannot decide itself is escalated, once. */
 export const askStaleMs = (env = process.env) => hoursMs(env.STUDIO_ASK_STALE_H, 8);
+/** The one condition an ask can carry: `disk>=<GB>` -> { freeDiskGb }; null when it is not that. */
+const parseClearWhen = (s) => { const m = String(s ?? '').trim().match(/^disk\s*>=\s*(\d+(?:\.\d+)?)$/i); return m ? { freeDiskGb: Number(m[1]) } : null; };
+const clearWords = (c) => `disk>=${c.freeDiskGb}`;
 /** The owner-only entry an ask is about, or null. */
 export const askOwnerTopic = (a) => ownerOnlyTopic(a?.question, a?.why);
 
-export function ask({ question, options = [], def = null, timeout = null, why = '', by = process.env.STUDIO_LOCK_OWNER || process.env.STUDIO_PRODUCER_NAME || 'producer', action = null, task = null, now = Date.now(), env = process.env }) {
+export function ask({ question, options = [], def = null, timeout = null, why = '', by = process.env.STUDIO_LOCK_OWNER || process.env.STUDIO_PRODUCER_NAME || 'producer', action = null, task = null, clearWhen = null, now = Date.now(), env = process.env }) {
   const q = String(question || '').trim();
   if (!q) return { ok: false, message: 'Ask something: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h' };
+  const clear = clearWhen == null ? null : parseClearWhen(clearWhen);
+  if (clearWhen != null && !clear) return { ok: false, message: `--clear-when "${clearWhen}" is not a condition the harness knows. Known: disk>=<GB> (free disk at least that many GB).` };
   const opts = (Array.isArray(options) ? options : String(options).split(',')).map((o) => o.trim()).filter(Boolean);
   // 2.83: owner-only words read as something else (code removed in a lane) are recorded (readAs).
   const readAs = ownerOnlyReadAs(q, why);
@@ -91,7 +97,7 @@ export function ask({ question, options = [], def = null, timeout = null, why = 
     deadlineFrom = 'STUDIO_ASK_TIMEOUT_H';
   }
   const n = allAsks().length + 1;
-  const a = write({ id: `A-${String(n).padStart(3, '0')}`, question: q.slice(0, 500), options: opts, default: def, why: String(why).slice(0, 500), by, at: new Date(now).toISOString(), deadline, ...(deadlineFrom ? { deadlineFrom } : {}), protected: protectedTopic, status: 'open', ...(action ? { action } : {}), ...(/^[A-Z]+-\d+$/.test(String(task || '')) ? { task: String(task) } : {}), ...(own ? { ownerOnly: own.act } : {}), ...(readAs.length ? { readAs } : {}) });
+  const a = write({ id: `A-${String(n).padStart(3, '0')}`, question: q.slice(0, 500), options: opts, default: def, why: String(why).slice(0, 500), by, at: new Date(now).toISOString(), deadline, ...(deadlineFrom ? { deadlineFrom } : {}), protected: protectedTopic, status: 'open', ...(action ? { action } : {}), ...(clear ? { clearWhen: clear } : {}), ...(/^[A-Z]+-\d+$/.test(String(task || '')) ? { task: String(task) } : {}), ...(own ? { ownerOnly: own.act } : {}), ...(readAs.length ? { readAs } : {}) });
   emitEvent({ type: 'ask.open', agent: by, to: 'human', msg: `${a.id} for the game dev: ${a.question}${deadline ? ` (if no answer by ${deadline.slice(11, 16)} UTC: "${def}")` : ''}`, ...(readAs.length ? { meta: { ask: a.id, readAs } } : {}) });
   const note = noTimer && (timeout || def) ? (own ? `This is about ${own.what}, which only the owner answers: no deadline.` : 'This is about signing, pillars or deleting, so it waits for a person: no deadline.') : null;
   return { ok: true, ask: a, note };
@@ -231,11 +237,20 @@ export function followed(id, { task = null, none = null, by = null } = {}) {
  * STUDIO_ASK_TIMEOUT_H from when it was asked; an ask that cannot decide itself is escalated once at STUDIO_ASK_STALE_H
  * (ask.stale); the owner's own asks are left alone (never a default, never escalated). Returns the ids decided.
  */
-export function expireAsks(now = Date.now(), env = process.env) {
+export function expireAsks(now = Date.now(), env = process.env, { freeGb = () => freeDiskGb(boardRoot()) } = {}) {
   const decided = [];
   const H = askTimeoutMs(env);
   const stale = askStaleMs(env);
   for (const a of openAsks()) {
+    // 2.99 (f): an ask whose condition holds is over, whoever it waits for (the owner's too).
+    const need = a.clearWhen?.freeDiskGb;
+    const free = need > 0 ? freeGb() : null;
+    if (free != null && free >= need) {
+      const answer = `cleared by itself: free disk is ${Math.round(free * 10) / 10} GB (the ask waited for ${need} GB)`;
+      write({ ...a, status: 'cleared', answer, answeredBy: 'harness', answeredAt: new Date(now).toISOString() });
+      emitEvent({ type: 'ask.closed', agent: 'harness', to: a.by, msg: `${a.id} closed: ${answer} (${String(a.question).slice(0, 200)})`.slice(0, 600), meta: { ask: a.id, cleared: true } });
+      continue;
+    }
     if (askOwnerTopic(a)) continue;
     const at = Date.parse(a.at) || now;
     const due = askDueAt(a, now, env);
@@ -293,7 +308,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   // 2.80 (d, A10): `show <id>` and `help` are read-only; a lone lowercase word is a mistyped subcommand, not a question.
-  const usage = 'Usage: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h [--why "…"] [--task <ID>] | show <id> | list [--open] | answer <id> "<answer>" --by <name> | reverse <id> "<answer>" --by <name> | followed <id> --task <ID> | --none "<why>" --by <name> | expire | help';
+  const usage = 'Usage: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h [--why "…"] [--task <ID>] [--clear-when "disk>=<GB>"] | show <id> | list [--open] | answer <id> "<answer>" --by <name> | reverse <id> "<answer>" --by <name> | followed <id> --task <ID> | --none "<why>" --by <name> | expire | help';
   if (argv.includes('--help') || argv.includes('-h') || pos[0] === 'help') { console.log(usage); process.exit(0); }
   if (pos[0] === 'show') {
     const a = allAsks().find((x) => x.id === String(pos[1] || '').toUpperCase());
@@ -306,9 +321,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const list = argv.includes('--open') ? openAsks() : allAsks();
     // 2.85: an open ask shows its age, and whether only the owner answers it.
     const age = (a) => { const h = Math.max(0, Math.floor((Date.now() - (Date.parse(a.at) || Date.now())) / 3600000)); return `open ${h} h`; };
-    console.log(list.length ? list.map((a) => `${a.id} [${a.status}] ${a.question}${a.options.length ? ` (${a.options.join(' / ')})` : ''}${a.status === 'open' ? ` (${age(a)}${askOwnerTopic(a) ? ', waiting for the owner' : ''}${a.staleAt ? ', escalated' : ''})` : ''}${a.status === 'open' && a.deadline ? `; default "${a.default}" at ${a.deadline.slice(0, 16)}` : ''}${a.answer ? ` -> ${a.answer}` : ''}`).join('\n') : 'No questions yet.');
+    console.log(list.length ? list.map((a) => `${a.id} [${a.status}] ${a.question}${a.options.length ? ` (${a.options.join(' / ')})` : ''}${a.status === 'open' ? ` (${age(a)}${askOwnerTopic(a) ? ', waiting for the owner' : ''}${a.staleAt ? ', escalated' : ''})` : ''}${a.status === 'open' && a.clearWhen ? `; clears when ${clearWords(a.clearWhen)}` : ''}${a.status === 'open' && a.deadline ? `; default "${a.default}" at ${a.deadline.slice(0, 16)}` : ''}${a.answer ? ` -> ${a.answer}` : ''}`).join('\n') : 'No questions yet.');
     process.exit(0);
   }
-  const made = ask({ question: pos[0], options: flag('options') || [], def: flag('default'), timeout: flag('timeout'), why: flag('why') || '', by: flag('by') || undefined, task: flag('task') });
+  const made = ask({ question: pos[0], options: flag('options') || [], def: flag('default'), timeout: flag('timeout'), why: flag('why') || '', by: flag('by') || undefined, task: flag('task'), clearWhen: flag('clear-when') });
   out(made, (r) => `${r.ask.id} asked${r.ask.deadline ? `; if nobody answers by ${r.ask.deadline.slice(0, 16)} UTC the default "${r.ask.default}" applies (logged)` : '; it waits for a person'}.${r.note ? ` ${r.note}` : ''}`);
 })().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });

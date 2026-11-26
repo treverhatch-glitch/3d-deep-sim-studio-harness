@@ -5577,6 +5577,15 @@ if (inShard('selftest-299b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.99 (f): a session's brief shows the first open checklist items, a long list is split on advice, an idle hand-back says so,
+// and an ask with --clear-when closes by itself.
+if (inShard('selftest-299f')) {
+  const dir = copyRepo();
+  const { selftest299F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-299f.mjs')).href);
+  await selftest299F({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

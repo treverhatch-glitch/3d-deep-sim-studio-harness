@@ -5,9 +5,14 @@
  *   npm run task -- split <ID> --every <n> --by <name>            child tasks from the open items, n a child
  * The list lives in the task's holds (studio/task-holds.json "checklist"; a lane's studio/ is main's). While an item is
  * open, or a part of a split is not done, every landing of the task is a slice: it goes back to ready.
+ * 2.99 (f): a session's brief shows the first 8 open items; a task over studio/game.json task.checklistSplitAt (8, 0 = off)
+ * open items is told to the producer once (adviseSplit); a hand-back with no commit and no item done says so (idleLine).
  */
 import fs from 'node:fs';
-import { readHolds, updateHolds } from './task-hold.mjs';
+import path from 'node:path';
+import { boardRoot, emitEvent } from './event.mjs';
+import { readJson } from './fsafe.mjs';
+import { readHolds, setHold, updateHolds } from './task-hold.mjs';
 
 const MARK = { done: '[x]', skipped: '[-]', split: '[>]' };
 export const itemsOf = (id, holds = readHolds()) => (Array.isArray(holds[id]?.checklist) ? holds[id].checklist : []);
@@ -71,3 +76,40 @@ export function finalNote(id, holds = readHolds()) {
 
 /** The open items in groups of `every` (task split). */
 export const splitGroups = (items, every) => { const o = openItems(items); const g = []; for (let i = 0; i < o.length; i += every) g.push(o.slice(i, i + every)); return g; };
+
+/** The open items a brief shows: the first `n`, then the count of the rest. */
+export function briefItems(id, items, n = 8) {
+  const o = openItems(items);
+  return [...o.slice(0, n).map((i) => `[ ] ${i.text}`), ...(o.length > n ? [`... and ${o.length - n} more open (npm run task -- checklist ${id} list)`] : [])];
+}
+
+/** studio/game.json task.checklistSplitAt: 8 when unset; 0 turns the advice off. */
+export function checklistSplitAt(root = boardRoot()) {
+  const n = Number(readJson(path.join(root, 'studio', 'game.json'), null)?.task?.checklistSplitAt);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 8;
+}
+
+/** "T-x has 23 open items: split it (...)" when the task has more open items than checklistSplitAt, else ''. */
+export function splitLine(id, holds = readHolds(), at = checklistSplitAt()) {
+  const n = openItems(itemsOf(id, holds)).length;
+  return at > 0 && n > at ? `${id} has ${n} open items: split it (\`npm run task -- split ${id} --every ${at}\`)` : '';
+}
+
+/** Tell the producer once for each open count (an event); never splits by itself. Returns the line or ''. */
+export function adviseSplit(id, { emit = emitEvent } = {}) {
+  const holds = readHolds();
+  const line = splitLine(id, holds);
+  const n = openItems(itemsOf(id, holds)).length;
+  if (!line || holds[id]?.splitAdvised === n) return '';
+  setHold(id, { splitAdvised: n });
+  emit({ type: 'task.split_advised', agent: 'harness', task: id, to: 'producer', status: 'warn', msg: line, meta: { open: n } });
+  return line;
+}
+
+/** The hand-back line for a session that left no commit and marked no item (since `sinceMs`), or ''. */
+export function idleLine(id, { commits, sinceMs, holds = readHolds() } = {}) {
+  const items = itemsOf(id, holds);
+  const first = openItems(items)[0];
+  if (!first || Number(commits) !== 0 || items.some((i) => i.state === 'done' && Date.parse(i.at) >= sinceMs)) return '';
+  return `This session left no commit and marked no checklist item. The next one starts with the first open item ("${first.text.slice(0, 80)}"), not with the whole list.`;
+}

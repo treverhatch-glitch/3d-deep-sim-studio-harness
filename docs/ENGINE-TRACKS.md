@@ -154,6 +154,11 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
     porter should work while the unit's slice waits for a train. The parent starts no new session, its queued slice still
     lands, and it closes by itself when its last part closes (event `task.split`; the parent's done line says "its parts
     landed"). Parts that change the same files clash at the queue door like any two lanes.
+  - 2.99: the brief of a session shows the first 8 open items and the count of the rest, and tells it to commit and mark
+    each item and to queue what is committed (`--slice`) rather than hand back with nothing. A task with more open items
+    than `studio/game.json` `task.checklistSplitAt` (8; 0 = off) is told to the producer once for each open count (event
+    `task.split_advised`, and a line in `task show`): "T-x has 23 open items: split it". Nothing splits by itself. A
+    hand-back with no commit and no item done gets one added line in the task's hand-off file.
   - One rule decides whether a landing closes a task (`harness/task-checklist.mjs` landingKeepsOpen): `--final` closes;
     open items, open parts of a split, or the slice mark keep it open. The `--slice` mark stays for a task with no list.
 

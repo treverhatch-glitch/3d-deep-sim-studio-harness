@@ -162,3 +162,5 @@ command that answers it; `npm run ask -- list --open` shows each open ask's age.
 owner's own asks (deleting data, keys: `harness/owner-acts.mjs`) never get a deadline and are listed in the
 digest as waiting for the owner. The watcher's pass (every `STUDIO_WATCH_INTERVAL` in the supervisor) applies the deadlines.
 `--task <ID>` links a question to a task: it closes when that task is done.
+`--clear-when "disk>=<GB>"` (2.99) closes an ask by itself, as `cleared`, once free disk is at least that many GB (the owner's own
+asks too); the watcher's pass checks it. It is the only condition: another is refused when the ask is made.

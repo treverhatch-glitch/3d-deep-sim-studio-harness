@@ -36,7 +36,9 @@ file a task for the web team.
 (`.lanes/engine/<T-ID>`, on the pass's branch): edit and commit there. Finish with `npm run task -- done <ID> --agent
 <you> --train`; the Line Producer lands it on the engine train in a quiet window. A unit too big for one session
 lands per slice: commit what is ported and run `npm run task -- done <ID> --agent <you> --train --slice`; the task
-comes back for the next session once the slice lands. The last slice goes with `--train` alone. A pass with a visual check needs
+comes back for the next session once the slice lands. The last slice goes with `--train` alone. With a checklist: port
+one item, commit it, mark it (`npm run task -- checklist <ID> done "<item>"`), then the next; when the session will not
+finish, queue what is committed as a slice rather than hand back with nothing. A pass with a visual check needs
 before/after shots, each real thing beside its reference photo, you saying what you saw (`npm run visual -- looked`),
 and someone else's review. Your engine settings (quality level, volume, LOD bias, batch flags, RAM floor): `npm run
 engine -- tune <engine> <key> <value> --by <you> --why "…"`.
