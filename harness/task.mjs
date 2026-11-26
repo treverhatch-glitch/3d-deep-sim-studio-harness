@@ -27,7 +27,7 @@ import { visionFixIds, visionFirst, mayFileVisionFix, parentIsVisionFix } from '
 import { PLAYER_TYPES } from './vision-card.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { inferLaneAtAdd, laneRequired, holdReason, queuedHeldWhy, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries, proposalState } from './task-hold.mjs';
-import { itemsOf, openItems, progress, itemLines, readItemsFile, changeChecklist, landingKeepsOpen, finalNote, splitGroups } from './task-checklist.mjs';
+import { itemsOf, openItems, progress, itemLines, readItemsFile, changeChecklist, landingKeepsOpen, finalNote, splitGroups, adviseSplit, splitLine, idleLine } from './task-checklist.mjs';
 import { stopIfOverBudget, overBudget as overBudgetOf } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -431,7 +431,7 @@ export function showTask(taskId, q = parseNextQueue()) {
     brief: fs.existsSync(path.join(STUDIO_STATE_DIR, 'briefs', `${taskId}.md`)) ? `.studio/briefs/${taskId}.md` : null,
     checklist: check ? check.checks.map((c) => `[${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : null,
     // 2.98 (c): the task's own list (task checklist): "7 of 12 done" and one line an item.
-    ...(itemsOf(taskId).length ? { items: { progress: progress(itemsOf(taskId)), lines: itemLines(itemsOf(taskId)) } } : {}),
+    ...(itemsOf(taskId).length ? { items: { progress: progress(itemsOf(taskId)), lines: itemLines(itemsOf(taskId)), ...(splitLine(taskId) ? { advice: splitLine(taskId) } : {}) } } : {}),
     // 2.85 (f): the vision card its brief carries (kind, words, the pillar or layer), and whether it is a vision fix.
     vision: (() => { try { const v = visionFor(task); return v.card ? { kind: v.card.kind, words: v.card.words, ...(v.card.pillar ? { pillar: v.card.pillar } : {}), ...(v.card.layer ? { layer: v.card.layer } : {}), ...(v.reviewed ? { reviewed: v.reviewed } : {}) } : null; } catch { return null; } })(),
     visionFix: (() => { try { return visionFixIds(readRecentEvents(50000)).has(taskId); } catch { return Boolean(meta.visionFix); } })(),
@@ -556,6 +556,7 @@ export function startTask(taskId, agent = null, { model = null, force = false, d
   const vis = (() => { try { const ty = taskType(target); const m = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta || {}; return { visionCard: visionFor(target).card?.kind || null, playerFacing: PLAYER_TYPES.has(ty) && !m.infra && !m.prototype }; } catch { return { visionCard: null, playerFacing: false }; } })();
   emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}`, meta: { ...(head ? { head } : {}), ...vis } });
   try { if (!readBaseline(target.id)) recordBaseline(target.id); } catch {}
+  try { adviseSplit(target.id); } catch { /* advice only */ }
   let brief = null;
   try {
     brief = writeFocus(target.id, agent)?.file || null;
@@ -974,7 +975,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (!u) return { error: 'unity-gate', message: `${target.id} is not done: the Unity gate didn't report (${`${ug.stderr || ''}${ug.stdout || ''}`.trim().slice(-300) || `exit ${ug.status}`}). node harness/unity-gate.mjs --task ${target.id} runs it.` };
     if (u.status === 'skipped' && !u.notUnity) console.log(`[task done] skipped the Unity gate: ${u.why}`);
     const later = u.status === 'refused' || u.status === 'not-run';
-    if (!u.ok) return { error: later ? 'unity-busy' : 'unity-gate', unity: u, message: `${target.id} is not done: the Unity gate ${u.status === 'refused' ? 'is busy' : u.status === 'not-run' ? 'did not run' : `says ${u.status}`}: ${u.why}${u.tail ? `\n${u.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}\n${later ? 'Run task done again later; nothing is wrong with the work.' : `Fix it and run task done again (node harness/unity-gate.mjs --task ${target.id} runs it; its log: ${u.log || '.studio/gates/out/unity.log'}).`}` };
+    if (!u.ok) return { error: later ? 'unity-busy' : 'unity-gate', unity: u, message: `${target.id} is not done: the Unity gate ${u.status === 'refused' ? 'is busy' : u.status === 'not-run' ? 'did not run' : `says ${u.status}`}: ${u.why}${u.tail ? `\n${u.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}${later ? (u.agentRun || /: the train goes first\./.test(u.why || '') ? '' : '\nRun task done again later; nothing is wrong with the work.') : `\nFix it and run task done again (node harness/unity-gate.mjs --task ${target.id} runs it; its log: ${u.log || '.studio/gates/out/unity.log'}).`}` };
   }
 
   // Forced past a failing check: uncommitted work in the claimed folders is saved as a patch first, so it isn't lost.
@@ -1138,6 +1139,7 @@ function sliceLanded(taskId, agent, { train, lock, why }) {
   clearAttempts(taskId);
   const left = progress(itemsOf(taskId));
   emitEvent({ type: 'task.slice_landed', agent: agent || 'train', task: taskId, to: 'producer', msg: `${taskId}: a slice landed (merge train ${train}); the task stays open (${why}${left ? `; checklist ${left}` : ''}) and the next session continues on the landed target`, meta: { train, why } });
+  try { adviseSplit(taskId); } catch { /* advice only */ }
   return { id: taskId, sliceLanded: true };
 }
 
@@ -1398,7 +1400,17 @@ export function foreignHookCommits(output, taskId, { cwd = REPO_ROOT, lane = inL
   return shas;
 }
 
-export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause, ownerStep, commits = 0 } = {}) {
+/** When this task's newest session started (ms), 0 when unknown. */
+const lastStartMs = (id) => readRecentEvents(20000).filter((e) => e.task === id && e.type === 'task.start').reduce((t, e) => Math.max(t, Date.parse(e.ts) || 0), 0);
+/** Commits in this lane copy since the task's newest start; undefined outside a lane copy (the count is unknown). */
+function laneCommitsSinceStart(id) {
+  if (!inLaneCopy()) return undefined;
+  const head = readRecentEvents(20000).filter((e) => e.task === id && e.type === 'task.start' && e.meta?.head).pop()?.meta.head;
+  const r = head && spawnSync('git', ['rev-list', '--count', `${head}..HEAD`], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
+  return r && r.status === 0 ? Number(r.stdout.trim()) : undefined;
+}
+
+export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause, ownerStep, commits } = {}) {
   let lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent && !force && holderRunning(lock.lock.owner)) {
     return { error: 'locked', message: `Task ${taskId} is claimed by ${lock.lock.owner}, which is still running. Only that owner can hand it back (or stop it: npm run agent -- stop ${lock.lock.owner}).` };
@@ -1446,7 +1458,9 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
-  fs.appendFileSync(file, `${head}\n${heading}\n${facts ? `${facts}\n` : ''}${note || 'No note left.'}\n`);
+  // 2.99 (f): a checklist session that left no commit and marked no item says so, in the file only (not a failure note).
+  const idle = (() => { try { return idleLine(target.id, { commits: commits ?? laneCommitsSinceStart(target.id), sinceMs: lastStartMs(target.id) }); } catch { return ''; } })();
+  fs.appendFileSync(file, `${head}\n${heading}\n${facts ? `${facts}\n` : ''}${note || 'No note left.'}\n${idle ? `${idle}\n` : ''}`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
   let ownerStepNow = ownerStep || null;
   if (!ownerStepNow && !cause) { try { ownerStepNow = ownerStepForHandBack(target.id, readRecentEvents(20000)); } catch { /* a hint, never a blocker */ } }
@@ -2537,7 +2551,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     let queued = null;
     try { queued = (await import('./unity-train.mjs')).setQueueTag(mainRoot(), arg1, tg, rec.engine); } catch { /* the record is what counts */ }
     emitEvent({ type: 'task.tag', agent: actor(), task: arg1, track: `engine:${rec.engine}`, msg: `${arg1} ${tg ? `is tagged ${tg}: only npm run task -- train --engine ${rec.engine} --tag ${tg} takes its lane` : 'is untagged: a plain engine train takes its lane'}${queued ? ' (queued)' : ''}`, meta: { tag: tg, engine: rec.engine, queued: Boolean(queued) } });
-    console.log(`${arg1} ${tg ? `is tagged ${tg}: only npm run task -- train --engine ${rec.engine} --tag ${tg} takes it; a plain train and the automatic start leave it queued` : 'has no tag: the next plain train (or the automatic start) takes it'}${queued ? '' : ' (not queued yet: task done --train queues it with this tag)'}.`);
+    console.log(`${arg1} ${tg ? `is tagged ${tg}: only npm run task -- train --engine ${rec.engine} --tag ${tg} takes it; a plain train leaves it queued. The automatic start takes the oldest tag group when no untagged lane waits, and a group past engines.${rec.engine}.tagMaxWaitHours (24) runs next` : 'has no tag: the next plain train (or the automatic start) takes it'}${queued ? '' : ' (not queued yet: task done --train queues it with this tag)'}.`);
     process.exit(0);
   }
   if (cmd === 'alone') {

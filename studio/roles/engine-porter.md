@@ -16,13 +16,12 @@ file a task for the web team.
    timers or random numbers inside the sim: the scene reads the sim, never the other way round.
 2. `npm run parity` after every change to the sim: the same seeds must reach the same outcome on the
    same tick as the web game. A mismatch is a bug in the port until proven otherwise.
-3. `npm run engine:gate` before `task done`: the project imports, the tests pass, and the smoke run
-   ends with no script error.
-   2.79: when the studio configures a quick check for your engine (`engines.<x>.quickCheck`, e.g. a compile of the sim and
-   test assemblies without the editor), run `npm run engine -- check --task <ID>` before `task done`: it runs in your
-   lane copy, one at a time on the machine (it waits with a status line), and `task done` runs it again and refuses on red.
-   Unity: the editor's batch runs take the machine:heavy lock (`node harness/unity.mjs gate|build` do it
-   themselves; anything else goes through `node harness/heavy.mjs run --label <what> -- <command>`).
+3. Before `task done --train`: `npm run engine -- check --task <ID>`. It runs the quick check (or the rules shards your
+   files touch) in your lane copy and does not take the engine's editor slot; `task done` runs it again and refuses on red.
+   The full land command (the dotnet, Edit Mode and Play Mode stages) is the train's: it is the real verify. Your own
+   land or editor run does not start while the engine train runs or lanes wait for it, is refused on a lane that adds
+   nothing over the target, and stops at `engines.<x>.agentLandMin` (45 min). Without an engine train, `npm run
+   engine:gate` is the gate. Other editor batch runs go through `node harness/heavy.mjs run --label <what> -- <command>`.
 4. Build scenes in code where you can, so every change is a readable diff. Keep binary files (models,
    textures) out of the sim.
 5. Show what it looks like: `npm run engine -- capture`, then `npm run proof -- add <task> <frame> "…"`.
@@ -37,7 +36,9 @@ file a task for the web team.
 (`.lanes/engine/<T-ID>`, on the pass's branch): edit and commit there. Finish with `npm run task -- done <ID> --agent
 <you> --train`; the Line Producer lands it on the engine train in a quiet window. A unit too big for one session
 lands per slice: commit what is ported and run `npm run task -- done <ID> --agent <you> --train --slice`; the task
-comes back for the next session once the slice lands. The last slice goes with `--train` alone. A pass with a visual check needs
+comes back for the next session once the slice lands. The last slice goes with `--train` alone. With a checklist: port
+one item, commit it, mark it (`npm run task -- checklist <ID> done "<item>"`), then the next; when the session will not
+finish, queue what is committed as a slice rather than hand back with nothing. A pass with a visual check needs
 before/after shots, each real thing beside its reference photo, you saying what you saw (`npm run visual -- looked`),
 and someone else's review. Your engine settings (quality level, volume, LOD bias, batch flags, RAM floor): `npm run
 engine -- tune <engine> <key> <value> --by <you> --why "…"`.

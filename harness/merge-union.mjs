@@ -1,13 +1,13 @@
 /**
- * harness/merge-union.mjs — 2.96 (c4): list files that only grow, merged as a union (engines.<x>.merge.union).
- *   unionGlobs(cfg)   the engine's merge.union globs ([] when unset)
- *   unionMerge(repo, ours, theirs, globs)   { tree, files } when ours and theirs conflict ONLY in files the globs name and,
- *     in each, both sides only added lines or lengthened a line (one run of text put into it); else null.
- *   unionWhy(repo, ours, theirs, globs)   why it is null, in one sentence naming the file and line ('' when not set).
- * The merged file: at each place in the base, ours' added lines, then theirs'; a line theirs adds there that ours added
- * too is kept once (a line with no letter or digit, such as "}," is always kept). What it cannot know: two lanes adding
- * the same key with different values both stay; the compile check and the tests decide. Blobs and a temporary index
- * only, never a worktree. Text is read as latin1, so every byte goes back as it came.
+ * harness/merge-union.mjs — 2.96 (c4): files merged by rule (engines.<x>.merge): "union" globs of files that only grow;
+ * 2.99 (e) "newer": [{ file: glob, field }], a JSON file taken whole from the side whose top-level date `field` is later.
+ *   mergeRules(cfg)   the rules: union globs (strings) and newer rules ({ file, field }); [] when unset
+ *   unionMerge(repo, ours, theirs, rules)   { tree, files, newer } when ours and theirs conflict ONLY in files a rule names
+ *     and each resolves (a union file: both sides only added or lengthened lines; a newer file: one date is later); else null.
+ *   unionWhy(...)   why it is null, in one sentence naming the file ('' when no rule names a conflicted file).
+ * A union file: at each place in the base, ours' added lines, then theirs'; a line both add is kept once (a line with no
+ * letter or digit, such as "}," is always kept). A newer file: missing, unparseable or equal dates stay a conflict. Blobs and
+ * a temporary index only, never a worktree; text is read as latin1, so every byte goes back as it came.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,10 +17,35 @@ import { matchAny } from './merge-lane.mjs';
 
 const run = (repo, args, extra = {}) => spawnSync('git', args, { cwd: repo, encoding: 'latin1', maxBuffer: 64 * 1024 * 1024, windowsHide: true, ...extra });
 
-/** engines.<x>.merge.union: the globs, as repo-relative paths with forward slashes. */
-export function unionGlobs(cfg) {
+/** engines.<x>.merge: the union globs (repo-relative, forward slashes) and the newer rules ({ file, field }). */
+export function mergeRules(cfg) {
   const u = cfg?.merge?.union;
-  return Array.isArray(u) ? u.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')) : [];
+  const n = cfg?.merge?.newer;
+  const glob = (x) => x.trim().replace(/\\/g, '/');
+  return [...(Array.isArray(u) ? u.filter((x) => typeof x === 'string' && x.trim()).map(glob) : []),
+    ...(Array.isArray(n) ? n.filter((x) => typeof x?.file === 'string' && x.file.trim() && typeof x.field === 'string' && x.field.trim()).map((x) => ({ file: glob(x.file), field: x.field.trim() })) : [])];
+}
+
+/** 2.99 (e): one rule's file taken whole: 'ours' or 'theirs', whichever's top-level `field` holds the later date; else { why }. */
+function newerSide(repo, f, field, ours, theirs) {
+  const at = (oid) => {
+    const b = run(repo, ['cat-file', 'blob', oid]);
+    try { const v = JSON.parse(Buffer.from(String(b.stdout), 'latin1').toString('utf8').replace(/^\uFEFF/, ''))?.[field]; return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? Date.parse(v) : NaN; } catch { return NaN; }
+  };
+  const [o, t] = [at(ours), at(theirs)];
+  if (!Number.isFinite(o) || !Number.isFinite(t)) return { why: `${f} has no date in its ${field} on ${Number.isFinite(o) || Number.isFinite(t) ? 'one side' : 'either side'} (merge.newer)` };
+  if (o === t) return { why: `${f} has the same ${field} on both sides (merge.newer)` };
+  return { side: o > t ? 'ours' : 'theirs' };
+}
+
+/** What the train says of one chain step's merge ({ files, newer: [{ file, from, field }] }). */
+export const newerSay = (n) => `${n.file} taken from ${n.from}: its ${n.field} is later`;
+/** One line for a chain's merges by rule (chainOnTarget's `union` list). */
+export function mergeSay(list, engine) {
+  const u = list.filter((x) => x.files.length);
+  const n = list.flatMap((x) => x.newer || []);
+  return [u.length ? `merged as a union (engines.${engine}.merge.union; both sides only added lines): ${u.map((x) => `${x.files.join(', ')} (${x.task} with ${x.with})`).join('; ')}` : '',
+    n.length ? `taken whole from the newer side (engines.${engine}.merge.newer): ${n.map(newerSay).join('; ')}` : ''].filter(Boolean).join('; ');
 }
 
 /** What `to` changes in `from` (two blobs): { adds: Map(place in from (0 = before line 1) -> lines), grown: Map(line no -> { p, ins }) }, or { bad } (a line no, 0 = not text) when it removes or rewrites a line. */
@@ -103,22 +128,34 @@ function contentConflicts(stdout) {
   return { tree: p[0].trim(), files };
 }
 
-/** The merge ({ tree, files }) or the reason there is none ({ why }, '' when merge.union is not set or names no conflicted file). */
-function tryUnion(repo, ours, theirs, globs) {
-  if (!globs.length) return { why: '' };
+/** The merge ({ tree, files, newer }) or the reason there is none ({ why }, '' when no rule names a conflicted file). */
+function tryUnion(repo, ours, theirs, rules) {
+  const globs = rules.filter((r) => typeof r === 'string');
+  const newerOf = (f) => rules.find((r) => typeof r === 'object' && matchAny(f, [r.file]));
+  if (!rules.length) return { why: '' };
   const mt = run(repo, ['merge-tree', '--write-tree', '-z', ours, theirs]);
   if (mt.status !== 1) return { why: '' };
   const c = contentConflicts(mt.stdout);
   if (!c) return { why: 'a conflict is not one of file contents (a rename or a delete)' };
   const names = Object.keys(c.files);
-  if (!names.some((f) => matchAny(f, globs))) return { why: '' };
-  const out = names.filter((f) => !matchAny(f, globs));
-  if (out.length) return { why: `${out.slice(0, 3).join(', ')} conflicts and is not listed in merge.union` };
+  const listed = (f) => Boolean(newerOf(f)) || matchAny(f, globs);
+  if (!names.some(listed)) return { why: '' };
+  const out = names.filter((f) => !listed(f));
+  if (out.length) return { why: `${out.slice(0, 3).join(', ')} conflicts and is not listed in merge.union or merge.newer` };
   if (!names.length || !/^[0-9a-f]{40,64}$/.test(c.tree)) return { why: 'git gave no conflicted file' };
   const blobs = [];
+  const newer = [];
   for (const f of names) {
     const v = c.files[f];
     if (!v[1] || !v[2] || !v[3] || !/^100(644|755)$/.test(v[1].mode) || v[2].mode !== v[1].mode || v[3].mode !== v[1].mode) return { why: `${f} was added, deleted or changed its mode on one side` };
+    const nr = newerOf(f);
+    if (nr) {
+      const w = newerSide(repo, f, nr.field, v[2].oid, v[3].oid);
+      if (w.why) return w;
+      blobs.push(`${v[1].mode},${v[w.side === 'ours' ? 2 : 3].oid},${f}`);
+      newer.push({ file: f, field: nr.field, from: w.side });
+      continue;
+    }
     const u = unionText(repo, v[1].oid, v[2].oid, v[3].oid);
     if (u.bad !== undefined) return { why: u.bad ? `${f} line ${u.bad} was rewritten, not only lengthened` : `${f} is not plain text` };
     const h = run(repo, ['hash-object', '-w', '--stdin'], { input: Buffer.from(u.text, 'latin1') });
@@ -132,15 +169,15 @@ function tryUnion(repo, ours, theirs, globs) {
     if (run(repo, ['read-tree', c.tree], { env }).status !== 0) return fail;
     for (const b of blobs) if (run(repo, ['update-index', '--cacheinfo', b], { env }).status !== 0) return fail;
     const w = run(repo, ['write-tree'], { env });
-    return w.status === 0 ? { tree: String(w.stdout).trim(), files: names } : fail;
+    return w.status === 0 ? { tree: String(w.stdout).trim(), files: names.filter((f) => !newerOf(f)), newer } : fail;
   } finally { try { fs.rmSync(idx, { force: true }); } catch { /* a temp file */ } }
 }
 
-/** See the header. Every conflicted file must match a glob, be text with the same regular mode in all three versions, and only grow on both sides. */
-export function unionMerge(repo, ours, theirs, globs = []) {
-  const r = tryUnion(repo, ours, theirs, globs);
+/** See the header. Every conflicted file must match a rule, have the same regular mode in all three versions, and resolve by it. */
+export function unionMerge(repo, ours, theirs, rules = []) {
+  const r = tryUnion(repo, ours, theirs, rules);
   return r.tree ? r : null;
 }
 
-/** Why unionMerge gave null, as one plain sentence ('' when merge.union is not set or names no conflicted file). */
-export const unionWhy = (repo, ours, theirs, globs = []) => tryUnion(repo, ours, theirs, globs).why || '';
+/** Why unionMerge gave null, as one plain sentence ('' when no rule names a conflicted file). */
+export const unionWhy = (repo, ours, theirs, rules = []) => tryUnion(repo, ours, theirs, rules).why || '';

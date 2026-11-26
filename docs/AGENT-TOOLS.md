@@ -101,9 +101,33 @@ with a `[launcher]` line when a Windows tool was started as an npm shim or throu
 The built-in list is `ALLOWED` in `harness/allowlist.mjs`. A studio adds its own in `studio/allowlist.json`, an array of `[label,
 pattern]` string pairs, e.g. `[["tool", "C:/Tools/bin/tool.exe *"]]`: at most 50 entries, each pattern at most 300 characters on one
 line, and it must name its command (fewer than 3 characters before the first `*` is skipped). Entries are appended to the list for
-Claude agents' `--allowedTools`, the kickoff's list and the denial report (`allowed(root)`). Invalid JSON, a non-array or a bad pair
-is ignored. agy's enrolment (below) stays on the owner's approved set. The file is protected (`studio/protected.json`): it changes
-only with the owner's signed approval.
+Claude agents' `--allowedTools`, the kickoff's list and the denial report (`allowed(root, role)`). Invalid JSON, a non-array or a bad
+entry is ignored. agy's enrolment (below) stays on the owner's approved set (it never reads this file). The file is protected
+(`studio/protected.json`): it changes only with the owner's signed approval.
+
+2.99: an optional third element limits an entry to some roles: `["tool", "C:/Tools/bin/tool.exe *", { "roles": ["builder"] }]`.
+Without it, every launched role gets the entry.
+
+**A program path with a space.** Claude Code matches a rule against the command text as typed (quotes included), and a path with a
+space only runs quoted. So the harness turns an entry whose program path has a space (written quoted, or ending in `.exe`, `.cmd`,
+`.bat` or `.com`) into the spellings that run: `Bash("…" args)` and `Bash('…' args)`, and for the PowerShell tool
+`PowerShell(& "…" args)` and `PowerShell(& '…' args)`, each with `/` and `\` in the path. The arguments stay exactly as written, so
+`tool.exe -b --python tools/build/*` allows only that and not `tool.exe *`. The unquoted rule is no longer made (it never matched a
+command that runs). A program path with `*`, `?`, `$` or a backtick is skipped. Every other entry gives one Bash rule, as before.
+The kickoff tells a session the spelling, one line per entry: "Allowed tool commands (type them exactly like this …)".
+Each call is still one command: a chain (`;`, `&&`, `|`) needs every part on the list, and the kickoff asks for one command per call.
+
+Examples (neutral names):
+
+```json
+[
+  ["some tool (scripts)", "C:/Program Files/Some Tool/tool.exe -b --python tools/build/*", { "roles": ["builder", "engine-porter"] }],
+  ["python tools", "python -E -P tools/build/*"]
+]
+```
+
+A denial of a quoted program is now keyed by the whole program (`Bash("C:/Program Files/Some Tool/tool.exe" *)`), not by the
+word before its first space.
 
 ## agy's allow-rules: the owner enrols them once
 

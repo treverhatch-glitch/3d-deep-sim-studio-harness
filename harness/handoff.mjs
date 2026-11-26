@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { taskType } from './done-check.mjs';
 import { parseNextQueue } from './task.mjs';
+import { splitLine } from './task-checklist.mjs';
 import { listLocks } from './lock.mjs';
 import { readLog, addLogNote } from './producer-log.mjs';
 import { watchPass } from './watch.mjs';
@@ -144,6 +145,9 @@ export function buildHandoff() {
   // 2.67.0 (B-38): the task's type (an owner's reclassification outranks the title), not a "Bug:/Fix" title match.
   const bugs = [...q.inProgress, ...q.backlog].filter((t) => taskType(t) === 'bug');
 
+  // 2.99 (f): open tasks with more open checklist items than task.checklistSplitAt: the same line task show gives, at most 3.
+  const splitAdvice = [...q.inProgress, ...q.backlog].map((t) => splitLine(t.id)).filter(Boolean).slice(0, 3);
+
   return {
     generatedAt: new Date().toISOString(),
     git: { branch: git('rev-parse', '--abbrev-ref', 'HEAD'), head: git('log', '-1', '--format=%h %s') },
@@ -152,6 +156,7 @@ export function buildHandoff() {
     decisions,
     queue: { inProgress: q.inProgress.map((t) => ({ ...t, owner: owner.get(t.id) || null })), next: q.backlog.slice().sort((a, b) => a.priority.localeCompare(b.priority)).slice(0, 6), backlogSize: q.backlog.length, done: q.done.length },
     forced,
+    splitAdvice,
     paused,
     watch,
     game: gameInfo,
@@ -240,6 +245,7 @@ export function renderHandoff(h) {
     ...(h.bible?.ideas.captured.filter((i) => !i.routed).map((i) => `- New idea ${i.id}: ${i.title} (route it: npm run idea -- route ${i.id})`) || []),
     ...(h.bible?.ideas.approved.map((i) => `- Approved idea ${i.id} isn't scheduled: task add "…" --idea ${i.id} --phase ${i.place?.phase}`) || []),
     ...(h.bible?.ideas.placed.length ? [`- ${h.bible.ideas.placed.length} idea(s) wait for the Director's decision`] : []),
+    ...(h.splitAdvice || []).map((l) => `- ${l}`),
     ...(h.pitfallProposals?.length ? [`- ${h.pitfallProposals.length} pitfall proposal(s) from agents wait for you: npm run pitfall -- proposed, then accept (with --scope <role>) or reject`] : []),
   ];
   add(...(first.length ? first : ['- Nothing urgent.']));

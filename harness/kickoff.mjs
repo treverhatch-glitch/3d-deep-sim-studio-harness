@@ -167,7 +167,7 @@ Set up once in your shell: \`${env}\`
 
 Read \`${roleFile}\`. Then \`npm run tester -- brief\` prints your run's brief: the build, your seeded plan (start mode, play style, goal), what landed since the last run, this run's regression area and the Game Bible's features.
 
-${allowedNote()}
+${allowedNote(REPO_ROOT, role)}
 
 1. Play the real build the way a player of your style would: \`node qa/tester-drive.mjs serve\`, \`open\`, \`click\`, \`key\`, \`drag\`, \`wait\`, and \`shot <name>\` often; open each screenshot with your file reader and look at it. \`console\` shows page errors, \`state\` the game's state when it exposes it.
 2. Write \`report.md\` and \`summary.json\` in the run folder (the brief shows the format): a verdict per area, each Bible feature working / broken / missing / not reached with a screenshot, every bug with the step it shows at.
@@ -184,7 +184,7 @@ Set up once in your shell: \`${env}\`
 
 The Game Bible (\`studio/bible/\`) is the authority on what the game is; you guard it. The Producer creates and assigns tasks; you tell it whether the work is on course and what the next work should serve. Read \`${roleFile}\` and \`studio/skills/direction.md\`.
 
-${allowedNote()}
+${allowedNote(REPO_ROOT, role)}
 
 When you are started (by a ping, daily, or by a person):
 1. \`node harness/task.mjs next --role director --agent ${agent}\` and start what it gives you (a \`Director review\`, a storyboard, or another task for your role): \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`.
@@ -206,7 +206,7 @@ Set up once in your shell: \`${env} STUDIO_PRODUCER_NAME=${agent}\`
 
 Start every session with \`npm run handoff\` and read it. New here? Read \`studio/MASTER.md\` and \`${roleFile}\` first.
 
-${allowedNote()}
+${allowedNote(REPO_ROOT, role)}
 
 Your job is decisions, not code:
 0. No Game Bible, or not signed? Pre-production comes first: \`npm run intake\` with the person (play length first; a demo is the easiest start), studies, storyboards, prototypes. Build tasks wait for the person's signature.
@@ -243,7 +243,7 @@ Set up once in your shell: \`${env}\`
 
 Read \`AGENTS.md\`, \`studio/skills/README.md\`${hasRole ? ` and \`${roleFile}\`` : ''}. Your task brief names what the task touches: read from there, as far as the task needs.
 
-${allowedNote()}
+${allowedNote(REPO_ROOT, role)}
 
 Loop:
 1. \`node harness/task.mjs next --role ${role} --agent ${agent}\` gives your most urgent task (or the one you already hold). \`node harness/task.mjs show <ID>\` shows its notes and checklist.

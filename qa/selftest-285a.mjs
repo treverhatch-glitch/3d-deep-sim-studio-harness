@@ -310,9 +310,9 @@ console.log(JSON.stringify({
   two: playSelection({ changed: ['Assets/UI/Panels/Shop/ShopPanel.cs', 'Assets/UI/Panels/Maps/MapsPanel.cs'], cfg }),
   unmapped: playSelection({ changed: ['Assets/UI/Panels/Shop/ShopPanel.cs', 'Assets/UI/Hud.cs', 'Assets/Scenes/Main.unity', 'Assets/Sim/Shop.cs'], cfg }),
 }));`);
-    await guard('2.85 (a) play focus per panel: a batch whose paths all match map entries (or ignore) runs focus with its own panel\'s filter plus smoke; two panels give both filters plus smoke; a path no entry takes makes it full, and the reason and the result NAME every unmatched path (up to 5), a play.focus.skip path in a mixed batch said as such (fails before this fix: only the first unmatched path was named)', () => [
+    await guard('2.85 (a) play focus per panel: a batch whose paths all match map entries (or ignore) runs focus with its own panel\'s filter plus smoke; two panels give both filters plus smoke; a path no entry takes makes it full, and the reason and the result NAME every unmatched path (up to 5), a play.focus.skip path in the batch is not named (2.99: it needs no Play Mode) (fails before this fix: only the first unmatched path was named)', () => [
       r.panel?.mode === 'focus' && r.panel.filter === 'Game.PlayTests.Panels.Shop;Game.PlayTests.Smoke' && r.two?.filter === 'Game.PlayTests.Panels.Shop;Game.PlayTests.Panels.Maps;Game.PlayTests.Smoke'
-        && r.unmapped?.mode === 'full' && r.unmapped.unmatched?.join() === 'Assets/UI/Hud.cs,Assets/Scenes/Main.unity,Assets/Sim/Shop.cs' && /3 changed path\(s\) match no play\.focus\.map entry: Assets\/UI\/Hud\.cs, Assets\/Scenes\/Main\.unity, Assets\/Sim\/Shop\.cs \(play\.focus\.skip/.test(r.unmapped.why),
+        && r.unmapped?.mode === 'full' && r.unmapped.unmatched?.join() === 'Assets/UI/Hud.cs,Assets/Scenes/Main.unity' && /2 changed path\(s\) match no play\.focus\.map entry: Assets\/UI\/Hud\.cs, Assets\/Scenes\/Main\.unity$/.test(r.unmapped.why),
       JSON.stringify(r).slice(0, 2000)]);
   }
   {

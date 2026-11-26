@@ -92,24 +92,3 @@ fails the score.
 Measure 12 (machine samples under 25% CPU) reads the single samples when the log has them and otherwise the hourly
 `machine.sample.summary` events, weighted by each summary's sample count (`meta.cpu`: n, mean, under25, over90). A
 summary written before 2.83 has no `meta.cpu`: it is skipped and the note says how many were.
-
-## Which commands a studio runs (2.84)
-
-`npm run commands-run` lists the harness commands this studio has run, by month, and every command file it has never run
-(with its npm script names and size). The evidence is an empty marker file per command and month under
-`.studio/usage/<YYYY-MM>/`, made when a `harness/` or `scripts/` file run as a command writes its first event (a command that only reads leaves
-none, and still writes nothing): the script's name and its
-first argument when that is a plain subcommand word, nothing else. It judges commands, not modules: a file never run as
-a command may still be used by import. `STUDIO_USAGE_MARKS=off` (default on) makes no markers. It exists so that a
-feature nobody uses is cut on a month of evidence from a live studio, not on a guess.
-
-## Which functions a studio runs (2.89)
-
-Below the command, the function: when a `harness/` or `scripts/` command runs in a studio, the names and positions
-(file, offset, line, name) of the functions that ran are appended to `.studio/usage/functions/<version>.tsv`, one file
-per harness version. No arguments, values or source are recorded. `npm run commands-run -- --functions` reads it (`--all`
-lists every file, `--json` gives data) and shows, per file, the functions that ran and the lines inside functions that
-never did. Two settings: `STUDIO_USAGE_FUNCTIONS=off` records nothing, and `STUDIO_USAGE_FUNCTIONS_MIN` (default 10
-minutes) is how often a process that runs long writes what it has seen. The cost is about 25 ms per command, measured
-on one machine. The limit: a record of days is not proof. A rare path, such as a restore or a new studio's setup, runs
-rarely, and a function called only before the record starts in a process is missed.

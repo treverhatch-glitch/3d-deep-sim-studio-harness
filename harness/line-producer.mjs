@@ -1144,6 +1144,14 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   let toldChanged = false;
   const out = [];
   for (const t of targets) {
+    // 2.99 (e): waiting lanes tested against a moved target; one that no longer merges is handed back now (ut.retestQueue).
+    if (acting) {
+      try {
+        const handBack = deps.handBack || (async (lane, note, o) => (await import('./task.mjs')).pauseTask(lane.task, lane.agent, note, { force: true, handBackCause: o?.cause }));
+        const rt = await ut.retestQueue(root, t.name, { now, by: LINE_AGENT, handBack });
+        if (rt.handed.length) logAction({ kind: 'engine-train', what: `the ${t.label} queue check handed back ${rt.handed.map((h) => `${h.task} (${h.why.split('\n')[0]})`).join('; ')}: ${rt.why}`, meta: { engine: t.name, tasks: rt.handed.map((h) => h.task), tested: rt.tested } }, { emit: false });
+      } catch { /* the train tests them at its start */ }
+    }
     // The automatic start takes untagged lanes; 2.98 (b): with none waiting, the tag group whose oldest lane waited longest.
     const qAll = ut.readUnityQueue(root, t.name);
     // 2.86: lanes a train left waiting for the target (red on it alone) are not counted until the target moves.
@@ -1151,8 +1159,18 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     try { waitT = ut.waitingOnTarget(root, t.name, qAll); } catch { /* counted */ }
     let q = qAll.filter((e) => !e?.tag && !waitT.has(e.task));
     const taggedN = qAll.length - q.length;
-    // Decided before any full run of the target alone (engines.<x>.tagsWhenIdle; false: only a person's train --tag).
-    const idle = !q.length && taggedN && ctl.tagsWhenIdle(t.cfg || {}) ? ctl.idleTag(qAll, waitT) : null;
+    // Decided before any full run of the target alone (ctl.nextTag: no untagged lane waits, or 2.99 (e) a group past
+    // engines.<x>.tagMaxWaitHours; engines.<x>.tagsWhenIdle false: only a person's train --tag). lastTag: the last train's.
+    // Held lanes (task after) are the ones the train's own pick leaves out (ut.heldNow); a group with none that can go does not run.
+    let heldT = null;
+    if (taggedN) { try { heldT = await ut.heldNow(root, t.name, deps.queue || (await import('./task.mjs')).parseNextQueue()); } catch { /* none counted */ } }
+    const turn = taggedN ? ctl.nextTag(qAll, { skip: waitT, cfg: t.cfg || {}, now, lastTag: ut.unityTrainStatus(root, t.name).last?.tag || null, held: heldT }) : null;
+    if (acting && told[`${t.name}-blocked`] !== (turn?.blocked ? turn.why : undefined)) {
+      if (turn?.blocked) told[`${t.name}-blocked`] = turn.why; else delete told[`${t.name}-blocked`];
+      toldChanged = true;
+      if (turn?.blocked) logAction({ kind: 'engine-train', what: `${turn.why} (engines.${t.name}.tagMaxWaitHours)`, meta: { engine: t.name, tag: turn.tag } }, { emit: false });
+    }
+    const idle = turn?.go ? turn : null;
     if (idle) q = qAll.filter((e) => e.tag === idle.tag && !waitT.has(e.task));
     // `train auto off --engine <x>` (.studio/train/<x>-auto.json; --hours runs out by itself).
     const ea = ctl.engineAutoState(root, t.name, { env, now });
@@ -1182,7 +1200,8 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
       try { const ow = ut.fullRulesOwedNow(root, t.name, env, now); if (ow.why) f.fullDue = f.fullDue ? `${f.fullDue}; the full rules run: ${ow.why}` : `the full rules run: ${ow.why}`; } catch { /* not owed */ }
     }
     const w = engineWindow(f, env);
-    if (idle && w.start) w.why = `no untagged ${t.label} branch waits: tag ${idle.tag} goes (${idle.n} lane(s), the oldest queued ${String(idle.oldestAt || '?').slice(0, 16)}; engines.${t.name}.tagsWhenIdle); ${w.why}`;
+    if (idle?.road === 'idle' && w.start) w.why = `no untagged ${t.label} branch waits: tag ${idle.tag} goes (${idle.n} lane(s), the oldest queued ${String(idle.oldestAt || '?').slice(0, 16)}; engines.${t.name}.tagsWhenIdle); ${w.why}`;
+    else if (turn?.road === 'overdue') w.why = `${turn.why} (engines.${t.name}.tagMaxWaitHours); ${w.why}`;
     if (autoOn && t.trainAuto && !ea.on && ea.source === 'file') {
       w.start = false; w.wait = false; w.why = ctl.autoOffWhy(ea, t.name);
       const last = Date.parse(told[t.name] || '');

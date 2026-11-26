@@ -154,6 +154,11 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
     porter should work while the unit's slice waits for a train. The parent starts no new session, its queued slice still
     lands, and it closes by itself when its last part closes (event `task.split`; the parent's done line says "its parts
     landed"). Parts that change the same files clash at the queue door like any two lanes.
+  - 2.99: the brief of a session shows the first 8 open items and the count of the rest, and tells it to commit and mark
+    each item and to queue what is committed (`--slice`) rather than hand back with nothing. A task with more open items
+    than `studio/game.json` `task.checklistSplitAt` (8; 0 = off) is told to the producer once for each open count (event
+    `task.split_advised`, and a line in `task show`): "T-x has 23 open items: split it". Nothing splits by itself. A
+    hand-back with no commit and no item done gets one added line in the task's hand-off file.
   - One rule decides whether a landing closes a task (`harness/task-checklist.mjs` landingKeepsOpen): `--final` closes;
     open items, open parts of a split, or the slice mark keep it open. The `--slice` mark stays for a task with no list.
 
@@ -179,6 +184,27 @@ a file not listed, a binary file, a rename or a mode change. The train's log, on
 and the tests decide. What it cannot know: two lanes that add the same key with different values both stay, and a
 line both add on purpose twice is kept once. When it refuses, the lane's reason (`deferred` or `conflicts with the target`) ends "merge.union did not apply: <file> line <n> was rewritten, not only lengthened" (or names a file not listed). With no `merge.union` every merge is as before. A `landMany` command
 merges the branches itself, so the train does not use `merge.union` with one.
+
+2.99: files where the newer side wins. `merge.union` helps only when both sides ADD lines. A small generated JSON file
+that both sides rewrite (a "pin" holding a commit id, its date and a fingerprint) needs another rule:
+`"merge": { "newer": [{ "file": "tools/SimTests/pin.json", "field": "date" }] }`. When two sides conflict only in files
+that `merge.union` and/or `merge.newer` name, each `newer` file is taken whole from the side whose top-level `field` holds
+the later date (an ISO date such as `2026-11-21T08:00:00Z`), and the merge goes on. A missing field, one that is not a
+date, a file that is not JSON or two equal dates leave it a conflict, as does any conflicted file no rule names. The log,
+the `task.train.<x>.union` event, `train status` and the summary say "tools/SimTests/pin.json taken from T-12: its date
+is later" (or "from the target"); the commit says `Newer-Merge:`. It works where the union does: the queue door, the
+batch's conflict test, the land merge and the queue check below. As with a union merge, the result is still compiled and
+tested before it lands, so a wrong pick is caught as a red, not landed. List only files a test checks.
+
+2.99: waiting lanes are tested against the target while they wait. A lane was tested when it was queued and again when a
+train took it; a tagged or held lane could wait for days while the target moved, then be handed back in the train's
+first minute. Now the Line Producer, at most every `"queueRetestHours": 6` (0 turns it off) and only when the target has
+moved since a lane's last test, merges each waiting lane (tagged and held ones too) with the target alone, the way the
+train does (refs only, `merge.union` and `merge.newer` included; no checkout, no editor, no heavy lock). A lane that no
+longer merges is handed back now, with the train's words and a `task.train.<x>.dropped` event (meta `check: "queue"`),
+so its owner brings the target in while the work is fresh; a lane that became empty is handed back as the train would.
+It does not run while a train runs (the train does its own test). A pass costs one `git merge-tree` per lane whose
+target moved (a few more for a lane that conflicts); the record is `.studio/engine/<x>-queue-check.json`.
 
 2.78.2 (item 18): `task done --train` on an engine pass it can't queue says why and exits 1 (a
 `task.train.not_queued` event), never going on as a studio lane in silence. The reasons
@@ -247,6 +273,13 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   was queued first, as `train --tag` does. It decides this before any full land run of the target alone. Set
   `"tagsWhenIdle": false` in the engine's config to leave tagged lanes to a person. `train status --engine <x>` says
   which rule applies on its tagged-lanes line.
+  2.99: on a busy line the untagged queue is never empty, so a tag group could wait for days. `"tagMaxWaitHours": 24`
+  (the default; 0 turns it off) runs a group whose oldest lane has waited longer than that as the next train, ahead of
+  untagged lanes. The wait counts from when the lane joined the group: the time its tag was set (`task tag`, or
+  `task done --train --tag`), else when it was queued. A re-queue or the same tag again keeps that time; a new tag starts
+  it again, because until then the lane rode untagged trains. One group at a time, the oldest first, and after a tag
+  train one untagged train runs before the next overdue group. `train status` and the Line Producer's log say "tag art
+  has waited 26 h (limit 24): it runs next". `"tagsWhenIdle": false` turns both roads off.
 - A batch cap: `"batchMax": 6` in the engine's config (`STUDIO_ENGINE_BATCH_MAX` overrides it; 0, the default, is no
   cap): a train takes at most that many lanes, the rest wait for the next train.
 - Grouping by risk: `"batchGroup": "play"` groups lanes by the Play Mode class of what each lane changes (the
@@ -454,6 +487,7 @@ All live in `studio/game.json` `engines.<x>`, beside `land`. Each is optional; a
 | --- | --- |
 | `"preLand": "<command>"` | Run once per lane before the long land run, in a throwaway checkout of the engine repo at the lane's commit (never the land script's own worktree), with `STUDIO_LANE_COMMIT`, `STUDIO_LANE_DIR` and `STUDIO_ENGINE_REPO` set (`preLandTimeoutMin`, default 10). A non-zero exit refuses that lane BEFORE the land run: it is handed back with the command's last 8 output lines, with `cause: precheck` on the event and the hand-back (not a red land run). A command that can't run defers the lane (nobody blamed). Example, generic: `"preLand": "<your pin check>"`, a script in the engine repo that compares the lane's pinned bundle id (read from the lane's own pin file in `STUDIO_LANE_DIR`) with the one the land would use, and exits 1 printing both ids when they differ. |
 | `"quickCheck": "<command>"` | The porter's own check, e.g. a compile of the sim and test assemblies without the editor. `npm run engine -- check [--engine unity] [--task <ID>]` runs it in the porter's lane copy (`.lanes/engine/<ID>`), one at a time per engine on the machine (the quick check command sees `STUDIO_ENGINE_LANE_DIR` (the lane copy it runs in) and `STUDIO_ENGINE`; lock `engine-check:<engine>`, a holder that is gone or older than `STUDIO_ENGINE_CHECK_STALE_MIN` (120) is taken over; a waiting check prints a status line; `STUDIO_ENGINE_CHECK_WAIT_MIN`, default 20). `task done` of an engine-porter task runs it and refuses on red. `quickCheckTimeoutMin` (30). With no `quickCheck` but the owner's own `"rules"` command (2.82), `task done` runs no check, and `npm run engine -- check` by hand is the rules check itself on the lane's committed work as it would land on the target: in a throwaway checkout with the rules' `inputs` copied in (never in the lane's folder), and only after the same check passed on the target; whenever it can't judge the lane it is skipped and the train's check of the batch decides. For a check at `task done`, set `quickCheck` to a compile. |
+| `"agentLandMin": 45` | 2.99: an agent's own land run (a worker session's `task done` without `--train`, `node harness/unity-gate.mjs --task`; never the train's, a person's, a Producer's or a Director's) stops after this many minutes with a "not run" result, not red (0 or "off": the land run's own `timeoutMin`). Only where the engine lands through a train (`target` is set); without one the agent's run is the verify and keeps `timeoutMin`. Such a run, and an agent's Unity editor run (`npm run engine:gate`, `node harness/unity.mjs gate`, `heavy.mjs run --kind unity`), does not start while the engine train runs or lanes wait for it ("the train goes first"), and a land run of a lane that adds nothing over the target is refused with the train's empty-lane words. The train is the real verify: `npm run engine -- check --task <ID>`, then `task done <ID> --train`. A person's own run is never held back: run it from a shell that is not a launched worker session. |
 | `"shots": "<folder>"` | Folder of PNGs the engine's play-mode tests write (relative to the land command's folder, or absolute). After a green land: the new shots go to `studio/proof/<task>/engine-after/`, the previous green land's (kept in `.studio/engine-shots/<engine>/last/`) to `engine-before/`, a side-by-side page `qa/reports/engine-compare/<task>.html` (before \| after per file name) is written, `last/` is updated, and one Studio Status line with the page path is queued through the Communicator. No shots, nothing happens. |
 | `"window": "quiet"` | Keep the quiet-window start (see above) for this engine instead of the engine slot. |
 

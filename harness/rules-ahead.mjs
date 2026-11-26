@@ -30,7 +30,8 @@ const short = (x) => String(x || '').slice(0, 10);
 const live = (m, o) => Boolean(m?.pid) && pidAlive(m.pid, o?.pid === m.pid ? o.identity : undefined) && holderLive({ pid: m.pid, at: Date.now() });
 /** 2.97: the last outcome, for `rules show`; a check ahead that never started says why. */
 const lastFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-ahead-last.json`);
-const note = (root, engine, train, outcome, why = '') => { try { put(lastFile(root, engine), { at: new Date().toISOString(), train, outcome, why: String(why).slice(0, 300) }); } catch { /* the log says it */ } };
+// 2.99 (b): `lent` (the shard greens the last one handed to a train that checked another tree) outlives the next outcome.
+const note = (root, engine, train, outcome, why = '', lent = undefined) => { try { put(lastFile(root, engine), { at: new Date().toISOString(), train, outcome, why: String(why).slice(0, 300), lent: lent ?? readJson(lastFile(root, engine))?.lent }); } catch { /* the log says it */ } };
 export const aheadNotStarted = (root, engine, train, why) => note(root, engine, train, 'not-started', why);
 export const aheadLast = (root, engine) => readJson(lastFile(root, engine));
 const tell = (root, engine, m, outcome, why = '') => { note(root, engine, m.train, outcome, why); try { emitEvent({ type: `task.train.${engine}.rules_ahead`, agent: `${engine}-train`, track: `engine:${engine}`, status: ['dropped', 'kept-red', 'not-started'].includes(outcome) ? 'warn' : 'ok', msg: `the check ahead of ${m.tasks.join(', ')}: ${outcome}${why ? ` (${why})` : ''}`.slice(0, 600), meta: { train: m.train, engine, tasks: m.tasks, head: m.head, tree: m.key, outcome, why: String(why).slice(0, 300) } }); } catch { /* the log says it */ } };
@@ -44,7 +45,7 @@ export function aheadStart({ root, engine, repo, target, head, next, lanes, cfg,
   // Detached on every system: on Windows a child that is not detached ends with the train's process, and this one must outlive it.
   const c = spawn(process.execPath, [SELF, fileOf(root, engine, '-job')], { cwd: root, env, detached: true, stdio: 'ignore', windowsHide: true });
   c.on('error', () => {}); c.unref();
-  const m = { train, pid: c.pid, tasks: job.lanes.map((l) => l.task), heads: job.lanes.map((l) => l.head), head, next, key: rulesKey({ repo, sha: next, cfg }), baseKey: rulesKey({ repo, sha: head, cfg }), at: new Date().toISOString(), told: 0 };
+  const m = { train, pid: c.pid, tasks: job.lanes.map((l) => l.task), heads: job.lanes.map((l) => l.head), head, next, reads: cfg?.shards?.keep === 'reads', key: rulesKey({ repo, sha: next, cfg }), baseKey: rulesKey({ repo, sha: head, cfg }), at: new Date().toISOString(), told: 0 };
   put(fileOf(root, engine, ''), m);
   note(root, engine, train, 'started', `${m.tasks.join(', ')} on ${short(head)}`);
   log(`of ${m.tasks.join(', ')} on ${short(head)} waits for this land run to hold the machine, then for free memory (pid ${c.pid})`);
@@ -102,7 +103,9 @@ export async function aheadVerdict(root, engine, { keep, why = '' }) {
 
 /**
  * The next train, before its own rules check: a check ahead for exactly the tree it wants (key) is waited for while it
- * runs; one for another tree, or one whose train ended without a verdict, is ended. { train, waitedMs, status } or null.
+ * runs; one whose train ended without a verdict is ended. 2.99 (b): one for another tree is ended too, unless it is kept
+ * and its shards are kept by what they read (rules.shards.keep "reads"): then it is waited for and its shard greens stay
+ * for the train's check (status 'other': its result answers no other tree). { train, waitedMs, status, shards? } or null.
  */
 export async function aheadFor(root, engine, { key, train, log = () => {} }) {
   const m = readJson(fileOf(root, engine, ''));
@@ -110,7 +113,8 @@ export async function aheadFor(root, engine, { key, train, log = () => {} }) {
   let { o, lines } = news(root, engine, m);
   for (const l of lines) log(`of train ${m.train} ${l}`);
   const want = m.verdict === 'kept' && key() === m.key;
-  if (!want || o.state === 'not-started') {
+  const lend = !want && m.verdict === 'kept' && m.reads;
+  if ((!want && !lend) || o.state === 'not-started') {
     if (m.verdict === 'kept' && !live(m, o)) { clear(root, engine); return null; }
     const why = !m.verdict ? 'its train ended before its land run answered' : 'this train checks another tree';
     if (live(m, o)) log(`of train ${m.train} was ended: ${why}`);
@@ -119,14 +123,19 @@ export async function aheadFor(root, engine, { key, train, log = () => {} }) {
   }
   const t0 = Date.now();
   const limit = Number(o.limitMs) > 0 ? o.limitMs : 120 * 60000;
-  if (live(m, o)) log(`of train ${m.train} still runs for this batch's tree: this train waits for it instead of running the same tests`);
+  if (live(m, o)) log(want ? `of train ${m.train} still runs for this batch's tree: this train waits for it instead of running the same tests` : `of train ${m.train} still runs for ${m.tasks.join(', ')}: this train waits for its shard greens (kept by what they read) instead of running those shards again`);
   // Its own runs end at their time limits; this bound is a safety net (the wait for the land run, rules.first, the batch).
   while (live(m, o) && Date.now() - Date.parse(m.at) < 3 * limit + 60000) await pause(200);
   ({ o, lines } = news(root, engine, m));
   for (const l of lines) log(`of train ${m.train} ${l}`);
   if (live(m, o) || o.state !== 'done') { await endIt(root, engine, m, o, 'it did not finish within its time limit'); return null; }
   clear(root, engine);
-  return { train: m.train, waitedMs: Date.now() - t0, status: o.status };
+  if (!lend) { note(root, engine, m.train, 'used', `train ${train} took its result: the same tree`); return { train: m.train, waitedMs: Date.now() - t0, status: o.status }; }
+  const n = rulesCacheKeys(root, engine).parts.filter((k) => k.startsWith('shard:reads:') && !(o.before?.parts || []).includes(k)).length;
+  const why = `${n} shard green(s) kept by what they read went to train ${train}, which checks another tree (${m.tasks.join(', ')} and more): it runs only the shards whose files its lanes change`;
+  note(root, engine, m.train, 'lent', why, { to: train, shards: n, at: new Date().toISOString() });
+  log(`of train ${m.train} ran for ${m.tasks.join(', ')} only: its result answers no other tree; ${why}`);
+  return { train: m.train, waitedMs: Date.now() - t0, status: 'other', shards: n };
 }
 
 /** `train cancel`: the check ahead ends with the train. */

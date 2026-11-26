@@ -16,7 +16,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { laneExcludeConfig, laneSparseState, studioMain } from './lane-sparse.mjs';
 import { globRe } from './merge-lane.mjs';
 import { readJson } from './fsafe.mjs';
-import { numTrimDefault as num } from './helpers.mjs';
+import { freeDiskGb, numTrimDefault as num } from './helpers.mjs';
 
 const GB = 1024 ** 3;
 const r2 = (x) => Math.round(x * 100) / 100;
@@ -201,7 +201,7 @@ export async function shortPass({ root = studioMain(), env = process.env, now = 
   const jn = await import('./janitor.mjs');
   const cfg = jn.diskPruneConfig(root);
   if (!cfg) return { ran: false, why: 'disk.pruneUnderGb is not set' };
-  const free = freeGb ? freeGb() : jn.freeDiskGb(root);
+  const free = freeGb ? freeGb() : freeDiskGb(root);
   if (!Number.isFinite(free) || free >= cfg.underGb) return { ran: false, why: 'free disk is over the line' };
   const f = path.join(root, '.studio', 'lanes', 'short-pass.json');
   const last = Date.parse(readJson(f, {})?.at || '') || 0;

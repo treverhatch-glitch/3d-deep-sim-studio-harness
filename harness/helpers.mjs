@@ -236,3 +236,8 @@ export const writeJsonTmp = (f, v) => { fs.mkdirSync(path.dirname(f), { recursiv
 
 // Local names it replaced: read (repo-relative text, CRLF as LF).
 export const readTextLf = (f) => readTextOrNull(f)?.replace(/\r\n/g, '\n') ?? null;
+
+/** Free GB on the drive that holds `root`, null when it cannot be read. Here (a leaf) so the janitor and asks share it. */
+export function freeDiskGb(root, statfs = (p) => fs.statfsSync(p)) {
+  try { const s = statfs(root); return (Number(s.bavail) * Number(s.bsize)) / 1024 ** 3; } catch { return null; }
+}

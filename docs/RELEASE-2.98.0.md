@@ -2,7 +2,7 @@
 
 The overseer's brief of 2026-11-24 (17 items), written after the studio on record had run 2.97.0 for three days, with
 the owner's order for this code base: keep it organised and take out what is no longer needed, is a duplicate, or is
-replaced by what goes in. Built on 2.97.0. Only this page and the one for 2.97.0 are kept; older release notes are in
+replaced by what goes in. Built on 2.97.0. Only this page and the one for 2.99.0 are kept; older release notes are in
 git history.
 
 ## What the records said

@@ -86,8 +86,13 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   RAM minus the floor holds what one rules run takes (`focus.splitGb`, else the largest measured peak, else 4 GB);
   never with a second gate in use. Unless the land run lands the batch unchanged, it is ended with its process tree and
   nothing of it is kept (also on `train cancel`, or a land run that dies out of memory, which is then retried without
-  it). Landed, the next train takes that same set when its lanes are unchanged, finds the kept result (its rules log
-  line says so) or waits for the run still going. A red ahead is only a red for that tree: it hands nobody back.
+  it). Landed, the next train finds the kept result for the same tree (its rules log line says so) or waits for the run
+  still going. 2.99: the next train picks its batch the normal way, lanes queued since included. With
+  `rules.shards.keep` "reads" it waits for the check ahead and keeps its shard greens: only the shards whose files the
+  new lanes change run. Without "reads", the check ahead answers only the tree it checked, so the train takes the checked
+  set only when the normal pick is not larger (its log says which road and why). A green from the check ahead never
+  answers a tree it did not check. `rules show` names the last outcome: `used` (same tree) or `lent` (how many shard
+  greens went to the next train). A red ahead is only a red for that tree: it hands nobody back.
   Event `task.train.<x>.rules_ahead` (`started`, `kept-green`, `kept-red`, `dropped`); `train status` shows it running.
   2.95: when it does not start (memory, the land run ended first, no rules check) the event says `not-started` and why.
   2.97: with `ahead` on, every land run logs that it started or one line saying why not (the rules green was not
@@ -101,6 +106,27 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   lanes on the checked target. A land script may use that to skip its own copy of the same tests. 2.91: with
   `rules.paths` or `rules.ignore` set, a target that moved only where the rules tests do not read (a land script's own
   record commit) still counts as the checked target; one log line names the two tips. Without them any move loses it.
+- **A land group that is part of the checked batch (2.99).** After a red land run drops a lane, the land run of the
+  lanes left is no longer the checked batch. The train then asks, in this order, and stops at the first answer: the
+  train's own green (exactly the checked lanes); a kept full pass of the group's tree (2.96); a rules check of the
+  group's own tree, as it would land. That last one runs only with `rules.shards` or a per-part `rules.focus`: kept
+  shards and parts are reused in seconds and only the others run. The log says `N of M shards kept, K re-run (x min)`.
+  Green: the land run gets `STUDIO_RULES_GREEN=1` and the mode of that check. Red: the lane it names is handed back as
+  any rules red, and the round starts again with the lanes left. A check that judges no lane (red on the target
+  itself): the land run runs its own rules stage. A studio with one whole rules command is not checked again: its land
+  script's own stage may be the cheaper run. Shards kept by what they read (`keep: "reads"`) also read the files no
+  shard takes, and the `rest` shard reads the whole tree: a dropped lane whose files are outside `rules.ignore` (or
+  `rules.paths`) makes them all run again. Put art and UI folders the rules tests never read under `rules.ignore`.
+- **Landing a mixed batch in parts (2.99, `engines.<x>.landParts`, off by default).** When true and the rules check
+  passed, a batch that holds lanes whose own changed paths give Play Mode `skip` (`play.focus.skip`) and lanes that need
+  a play run lands in two rounds: part 1 the skip lanes (Play Mode skipped), then part 2 the rest on the target part 1
+  moved. Part 1's green comes from a kept full pass of its tree or from the check of its own tree (above); part 2's tree
+  is the checked tree again, so its kept results answer. The batch is split only when that is cheap: a kept full pass
+  of part 1's tree, or shards or parts whose check again `rules-plan` puts at 3 min or less. Otherwise it lands whole
+  and one log line says why. A red in either part is judged within that part. The log, `train status` ("land run,
+  part 1 of 2 (skip lanes)"), the `land_parts` event and the `landed` events say which part ran. The cost: the land
+  script's Edit Mode stage (and its own fixed start-up) runs once per part; what it saves is the skip lanes' wait for
+  the other lanes' Play Mode.
 - A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane. That lane is
   handed back with cause `rules`, the failing test names and the command's last lines, and the rest is checked again.
   `STUDIO_ENGINE_RULES_MAX_RUNS` (12) bounds the runs for one batch; past it the lanes left go to the land run unjudged.
@@ -420,6 +446,10 @@ breaks a scene, a prefab or a runtime script that reads those rules lands unseen
 a full land run (`STUDIO_LAND_FULL=1`), which is the backstop: keep it daily. `engine.land` says `playMode: 'skip'`; the
 scorecard's Play stage line counts skipped runs.
 
+**A mixed batch (2.99).** Paths that match `skip` need no Play Mode of their own. If every other path matches a `map`
+entry, the stage is `focus` with those filters plus `smoke`; the why line reads "12 changed path(s) mapped by
+play.focus, 30 more need no Play Mode (play.focus.skip)". One path that matches neither sends the stage to full.
+
 **What a land script should honour.** Every variable the harness sets for the land command (all optional to use):
 
 | Variable | What to do with it |
@@ -436,6 +466,8 @@ scorecard's Play stage line counts skipped runs.
 | `STUDIO_LAND_RETRY` | `1`: this run repeats a red one; the branches are the same. |
 | `STUDIO_LAND_RETRY_STAGE` | The stage that was red (`play`, `edit`, ...). |
 | `STUDIO_LAND_RETRY_TESTS` | The failed tests' full names joined by `;`: re-run just those on the merged tree; land if they pass. |
+| `STUDIO_LAND_RETRY_TESTS_EDIT` | 2.99: the same names when they came from the Edit Mode stage (unset when none did). |
+| `STUDIO_LAND_RETRY_TESTS_PLAY` | 2.99: the same names when they came from the Play Mode stage (unset when none did). |
 | `STUDIO_LAND_RESULT` | A file to write the stage report to (`stages`/`gates`, and a `failures` list of test full names). |
 | `STUDIO_LAND_PROBE` | `1` (2.86): land nothing. Merge the branch(es) given (for the target alone: a ref at the target's own tip), run the tests (with `STUDIO_LAND_RETRY_TESTS`: only those; with `STUDIO_LAND_FULL=1`: all), put the worktree back; exit 0 green, 1 red. Print `[land-probe] honoured` so the train may run its by-name steps on lanes. |
 | `STUDIO_LAND_KNOWN_RED` | (2.86, only with `engines.<x>.knownRedHours`) listed flaky tests a probe found red on the target alone, joined by `;`: a script may leave them out of its verdict and land when nothing else is red. |
@@ -601,6 +633,20 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   `STUDIO_LAND_PROBE=1` (a probe or the full run; kept in `.studio/train/<x>-probe.json`), or the owner sets
   `engines.<x>.landProbe: true`. A by-name step on lanes gives the script the lanes' branches (or an integration
   branch): a script that ignored the variable could land them, which is why it must have said so first.
+- **By-name runs (2.99): the contract.** A by-name run gets `STUDIO_LAND_PROBE=1`, `STUDIO_LAND_RETRY=1`,
+  `STUDIO_LAND_RETRY_STAGE` (the first red stage), `STUDIO_LAND_RETRY_TESTS` and, per stage,
+  `STUDIO_LAND_RETRY_TESTS_EDIT` / `STUDIO_LAND_RETRY_TESTS_PLAY`. It runs only that stage. When the names came from the
+  Edit Mode stage it gets `STUDIO_PLAY_MODE=skip` and no play filter; when they came from Edit or Play Mode it gets
+  `STUDIO_RULES_GREEN=1` (`STUDIO_RULES_MODE=full`): the rules tests need no run in a run that lands nothing. The run
+  report does not say which test failed in which stage, so names from two red stages go to both variables and the play
+  stage runs with them. A filter that matches no test is an answer (nothing ran: exit 0, or 1 when the script counts
+  "no test ran" as red), never a reason to run the whole stage. The harness cannot make a script honour the filter,
+  so it refuses to pay for one that does not: a by-name run is ended after `engines.<x>.byNameMin` minutes (default
+  20), the event `task.train.<x>.by_name_cut` says "the by-name run was cut after N min", and the train goes on with
+  complete land runs (the land run without the suspect first). A cut run never starts a halving search.
+  When every failing test is declared only in the suspect lane's own files (its class is not in the tree of the batch
+  without it), no by-name run is tried: it could find none of them. The land run without the lane goes at once and
+  the blame event says "the failing tests are the lane's own new tests".
 - **When a run that must land nothing moves the target (2.86, 2.86.1).** After every run told `STUDIO_LAND_PROBE=1`
   the train compares the target's tip with the one before.
   - *A run of the target alone* (the daily full run, the probe of a flaky test) carries no branch, so a moved tip
@@ -971,8 +1017,14 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   keeps all of those paths (`.studio/engine/<x>-play-gaps.jsonl`). The digest says how often that happened in 24 hours
   and for which folders. `npm run engine -- play-plan --propose [--engine <x>] [--branch <b> | --paths a,b] [--json]`
   groups the paths by folder (without `--branch` or `--paths`, the paths of the last 7 days) and proposes an entry for
-  each: `skip` when the rules tests already judge the folder (a `rules.focus` map entry or auto folder) or
-  `play.focus.skip` takes every path, else a `map` entry whose filter you fill in. Nothing is written to `studio/game.json`.
+  each: `skip` when the rules tests already judge the folder (a `rules.focus` map entry or auto folder), else a `map` entry whose filter you fill in. Nothing is written to `studio/game.json`.
+- **Play Mode time per fixture (2.99).** `engines.<x>.play.times` is a glob (inside the engine's working folder) for
+  the engine's own test result files (`.trx`, NUnit or JUnit XML), as `rules.times`. After a land run whose play stage
+  passed, the minutes of each fixture (class) are kept, the last 5 per fixture, under `play` in
+  `.studio/engine/<x>-times.json`. A focused land run says "about N min expected" when its filter names kept fixtures.
+  `play-plan` prints under the plan the 10 slowest fixtures with the total, and the minutes each `map` entry's filter
+  costs (`?` when the filter is a pattern or a `$1` template); `play-plan --propose` says what it knows about each
+  entry's cost. With `play.times` unset nothing is read and nothing changes.
 - **A busy line.** The refill counts the open builder tasks that can start now (not held, parked, over budget, waiting
   for another task or queued for a train). When fewer than `STUDIO_REFILL_MIN` can start, it wakes the Producer with
   the cause ("nothing can start: n open tasks wait for the engine train or for another task. Propose the next ready work
