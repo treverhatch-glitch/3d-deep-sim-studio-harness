@@ -283,8 +283,8 @@ console.log(JSON.stringify({
   skipOnly: playSelection({ changed: ['Assets/Sim/Fees.cs'], cfg: only }),
   skipOnlyOther: playSelection({ changed: ['Assets/Scenes/Main.unity'], cfg: only }),
 }));`);
-    await guard('2.84 (t) play.focus.skip, the decision: every changed path (after ignore) matching a skip pattern gives mode "skip"; never on a full land run; one path outside skip goes on to the focus map as before (here: no map entry, so full); focus still works; a config with only skip works (fails before this fix: there was no skip mode)', () => [
-      r.skip?.mode === 'skip' && r.skip.filter === '' && r.fullRun?.mode === 'full' && r.mixed?.mode === 'full' && r.focus?.mode === 'focus' && r.focus.filter === 'Game.PlayTests.Hangar;Game.PlayTests.Smoke'
+    await guard('2.84 (t) play.focus.skip, the decision: every changed path (after ignore) matching a skip pattern gives mode "skip"; never on a full land run; paths outside skip go on to the focus map (2.99: a skip path in a mixed batch needs no Play Mode, so skip plus a mapped path is focus; a path no entry takes is full); focus still works; a config with only skip works (fails before this fix: there was no skip mode)', () => [
+      r.skip?.mode === 'skip' && r.skip.filter === '' && r.fullRun?.mode === 'full' && r.mixed?.mode === 'focus' && r.mixed.filter === 'Game.PlayTests.Hangar;Game.PlayTests.Smoke' && r.focus?.mode === 'focus' && r.focus.filter === 'Game.PlayTests.Hangar;Game.PlayTests.Smoke'
         && r.skipOnly?.mode === 'skip' && r.skipOnlyOther?.mode === 'full',
       JSON.stringify(r).slice(0, 2000)]);
   }

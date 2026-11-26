@@ -68,7 +68,7 @@ export function proposeGroups(paths, { play = null, rules = null } = {}) {
     const rule = list.every(judged);
     const match = folder === '(top folder)' ? `^[^/]+$` : `^${esc(folder)}`;
     const kind = rule || taken ? 'skip' : 'map';
-    const why = taken ? 'play.focus.skip already takes every path (it still sends a mixed batch to the full stage)' : rule ? 'the rules tests already judge these paths' : 'no rules test or Play Mode filter covers these paths yet';
+    const why = taken ? 'play.focus.skip already takes every path' : rule ? 'the rules tests already judge these paths' : 'no rules test or Play Mode filter covers these paths yet';
     return { folder, count: list.length, paths: list.slice(0, 5), kind, entry: kind === 'skip' ? match : { match, filter: '<the Play Mode tests for this folder>' }, why };
   }).sort((a, b) => b.count - a.count || a.folder.localeCompare(b.folder));
 }

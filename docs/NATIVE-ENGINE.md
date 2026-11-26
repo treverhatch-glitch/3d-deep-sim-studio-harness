@@ -420,6 +420,10 @@ breaks a scene, a prefab or a runtime script that reads those rules lands unseen
 a full land run (`STUDIO_LAND_FULL=1`), which is the backstop: keep it daily. `engine.land` says `playMode: 'skip'`; the
 scorecard's Play stage line counts skipped runs.
 
+**A mixed batch (2.99).** Paths that match `skip` need no Play Mode of their own. If every other path matches a `map`
+entry, the stage is `focus` with those filters plus `smoke`; the why line reads "12 changed path(s) mapped by
+play.focus, 30 more need no Play Mode (play.focus.skip)". One path that matches neither sends the stage to full.
+
 **What a land script should honour.** Every variable the harness sets for the land command (all optional to use):
 
 | Variable | What to do with it |

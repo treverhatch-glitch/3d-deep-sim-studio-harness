@@ -789,7 +789,7 @@ export const PLAY_FILTER_SAFE = /^[A-Za-z0-9_.;|~=!()* -]+$/;
 /**
  * What the land's Play Mode stage is told (a hint the land script may use; focus is weaker than full). changed: repo
  * paths (null: unknown); full: a full land run. { mode: 'focus' | 'skip' | 'full', filter, why, refused? }. Focus only
- * when every changed path matches a play.focus.map entry and the filter is PLAY_FILTER_SAFE.
+ * when every changed path that play.focus.skip does not take matches a map entry and the filter is PLAY_FILTER_SAFE.
  */
 export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = '' } = {}) {
   const pf = playFocusConfig(cfg);
@@ -808,24 +808,25 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
     if (pf.smoke && PLAY_FILTER_SAFE.test(pf.smoke)) return { mode: 'focus', filter: pf.smoke, why: `every changed path matches play.focus.ignore (${ig.ignored.length}): the smoke filter alone`, ignored: ig.ignored, ...bad };
     return fullSel(`every changed path matches play.focus.ignore (${ig.ignored.length}) and there is no smoke filter`, { ignored: ig.ignored, ...bad });
   }
-  // Every path left matches play.focus.skip (rules code covered by .NET tests): no Play Mode run; the daily full land run is the backstop.
+  // Paths that match play.focus.skip need no Play Mode of their own: all of them is no run; else the rest must be mapped.
+  let skipped = 0;
+  let rest = ch;
   if (pf.skip.length) {
     const sk = ignoreSplit(ch, pf.skip);
     for (const b of sk.bad) if (!bad.ignoreBad) bad.ignoreBad = [b]; else if (!bad.ignoreBad.includes(b)) bad.ignoreBad.push(b);
     if (!sk.kept.length && sk.ignored.length) return { mode: 'skip', filter: '', why: `every changed path (${sk.ignored.length}) matches play.focus.skip: no Play Mode run`, ...bad };
+    skipped = sk.ignored.length;
+    rest = sk.kept;
   }
-  const ff = focusFilters({ changed: ch, map: pf.map, smoke: pf.smoke, join: pf.join });
+  const ff = focusFilters({ changed: rest, map: pf.map, smoke: pf.smoke, join: pf.join });
   if (!ff.ok) {
-    // 2.85: name every path no map entry takes (up to 5), so a studio can see what to add to its map; a path that matches
-    // play.focus.skip still sends a mixed batch to the full stage (2.84's rule, kept), and is named as such.
-    const um = unmappedPaths(ch, pf.map);
-    const sk = pf.skip.length ? new Set(ignoreSplit(um, pf.skip).ignored) : new Set();
-    const shown = um.slice(0, 5).map((p) => (sk.has(p) ? `${p} (play.focus.skip, in a batch with other paths)` : p));
-    return fullSel(`${um.length} changed path(s) match no play.focus.map entry: ${shown.join(', ')}${um.length > 5 ? ', ...' : ''}${pf.map.length ? '' : ' (play.focus has no map)'}`, { unmatched: um.slice(0, 5), unmatchedAll: um, unmatchedCount: um.length, ...bad });
+    // 2.85: name every path no map entry takes (up to 5), so a studio can see what to add to its map.
+    const um = unmappedPaths(rest, pf.map);
+    return fullSel(`${um.length} changed path(s) match no play.focus.map entry: ${um.slice(0, 5).join(', ')}${um.length > 5 ? ', ...' : ''}${pf.map.length ? '' : ' (play.focus has no map)'}`, { unmatched: um.slice(0, 5), unmatchedAll: um, unmatchedCount: um.length, ...bad });
   }
   if (!ff.filter) return fullSel('the filter is empty', bad);
   if (!PLAY_FILTER_SAFE.test(ff.filter)) return fullSel(`refused the filter "${ff.filter.slice(0, 120)}": only letters, digits, space and _ . ; | ~ = ! ( ) * - may reach the land command`, { refused: true, ...bad });
-  return { mode: 'focus', filter: ff.filter, why: `${ch.length} changed path(s), all mapped by play.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}`, ...bad };
+  return { mode: 'focus', filter: ff.filter, why: `${rest.length} changed path(s) ${skipped ? 'mapped by play.focus, ' + skipped + ' more need no Play Mode (play.focus.skip)' : 'all mapped by play.focus'}${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}`, ...bad };
 }
 
 /**
