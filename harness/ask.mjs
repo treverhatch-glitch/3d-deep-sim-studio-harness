@@ -20,8 +20,7 @@ import { betaActor } from './beta-mode.mjs';
 import { ownerOnlyTopic, ownerOnlyWhy, ownerOnlyReadAs } from './owner-acts.mjs';
 import { selfNamingShell, DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { logDecision } from './decisions-log.mjs';
-import { doneExit as out, flagOf, readJsonOrNull as read } from './helpers.mjs';
-import { freeDiskGb } from './janitor.mjs';
+import { doneExit as out, flagOf, readJsonOrNull as read, freeDiskGb } from './helpers.mjs';
 
 export const ASKS_DIR = path.join(REPO_ROOT, 'studio', 'asks');
 const LOG = path.join(REPO_ROOT, 'studio', 'decisions', 'decided-without-you.md');

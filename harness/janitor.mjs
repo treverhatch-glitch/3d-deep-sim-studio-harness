@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, getEventPaths } from './event.mjs';
 import { pidAlive, readJson } from './fsafe.mjs';
-import { bytesUnder, flagOf, mtimeMs as mtime, numTrimDefault as num } from './helpers.mjs';
+import { bytesUnder, flagOf, freeDiskGb, mtimeMs as mtime, numTrimDefault as num } from './helpers.mjs';
 import { tasksOf } from './landings.mjs';
 
 const H = 3600000;
@@ -252,10 +252,6 @@ export function diskPruneConfig(root) {
   const d = readJson(path.join(root, 'studio', 'game.json'))?.disk;
   const under = Number(d?.pruneUnderGb);
   return under > 0 ? { underGb: under, idleHours: Number(d.idleHours) > 0 ? Number(d.idleHours) : 1 } : null;
-}
-/** Free GB on the studio's drive, null when it cannot be read. */
-export function freeDiskGb(root, statfs = (p) => fs.statfsSync(p)) {
-  try { const s = statfs(root); return (Number(s.bavail) * Number(s.bsize)) / 1024 ** 3; } catch { return null; }
 }
 
 /** The engine worktrees (.lanes/engine/<task>) as removal candidates, or kept with the test they failed. */
