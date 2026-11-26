@@ -112,6 +112,16 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   script's own stage may be the cheaper run. Shards kept by what they read (`keep: "reads"`) also read the files no
   shard takes, and the `rest` shard reads the whole tree: a dropped lane whose files are outside `rules.ignore` (or
   `rules.paths`) makes them all run again. Put art and UI folders the rules tests never read under `rules.ignore`.
+- **Landing a mixed batch in parts (2.99, `engines.<x>.landParts`, off by default).** When true and the rules check
+  passed, a batch that holds lanes whose own changed paths give Play Mode `skip` (`play.focus.skip`) and lanes that need
+  a play run lands in two rounds: part 1 the skip lanes (Play Mode skipped), then part 2 the rest on the target part 1
+  moved. Part 1's green comes from a kept full pass of its tree or from the check of its own tree (above); part 2's tree
+  is the checked tree again, so its kept results answer. The batch is split only when that is cheap: a kept full pass
+  of part 1's tree, or shards or parts whose check again `rules-plan` puts at 3 min or less. Otherwise it lands whole
+  and one log line says why. A red in either part is judged within that part. The log, `train status` ("land run,
+  part 1 of 2 (skip lanes)"), the `land_parts` event and the `landed` events say which part ran. The cost: the land
+  script's Edit Mode stage (and its own fixed start-up) runs once per part; what it saves is the skip lanes' wait for
+  the other lanes' Play Mode.
 - A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane. That lane is
   handed back with cause `rules`, the failing test names and the command's last lines, and the rest is checked again.
   `STUDIO_ENGINE_RULES_MAX_RUNS` (12) bounds the runs for one batch; past it the lanes left go to the land run unjudged.

@@ -25,7 +25,7 @@ import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeComman
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets, perPartOn } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets, perPartOn, rulesPlan } from './engine-rules.mjs';
 import { noteUnmatched, proposeGaps } from './play-gaps.mjs';
 import { compileSearchOf, compileSearch, compileAt, compilerLines } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
@@ -332,6 +332,8 @@ export function shareLaneInputs(root, engine, s, task, log = () => {}) {
 }
 
 /** The stage a red land run failed in first (from its stage report), or null when it reported none. */
+/** 2.99 (a): engines.<x>.landParts splits a batch only when part 1's rules check again costs this many minutes at most. */
+const PART_RECHECK_MIN = 3;
 const redStagesOf = (r) => (Array.isArray(r?.stages) ? r.stages.filter((x) => x && x.name && !/^(pass|passed|ok|skip|skipped)$/i.test(String(x.status || ''))).map((x) => x.name) : []);
 export const firstRedStage = (r) => redStagesOf(r)[0] || null;
 
@@ -1414,6 +1416,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     }
   }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
+  const partOf = new Map();
   // Compile first (engines.<x>.compileFirst, read at each land run): STUDIO_LAND_ONLY=compile before a group's land run.
   // compileOff: the land script showed it does not honour that, so this train stops asking.
   let compileOff = false;
@@ -1814,7 +1817,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const base = s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : s.folder;
       try { shotJobs.push(recordEngineShots({ root, engine, tasks: group.map((l) => l.task), shotsDir: path.resolve(base, s.cfg.shots), deps: deps.shots || {} }).then((x) => { if (x) log(`[unity-train] ${id}: before/after shots: ${x.pages.join(', ')}`); }).catch((e) => log(`[unity-train] ${id}: before/after shots failed: ${e.message}`))); } catch (e) { log(`[unity-train] ${id}: before/after shots failed: ${e.message}`); }
     }
-    ev('landed', id, `${target} moved to ${short(r.newTip)} on one land run: ${group.map((l) => l.task).join(', ')}`, { agent: by, status: 'ok', meta: { head: r.newTip, lanes: group.map((l) => l.task) } });
+    const pt = partOf.get(group[0]?.task);
+    ev('landed', id, `${target} moved to ${short(r.newTip)} on one land run${pt ? `, ${pt}` : ''}: ${group.map((l) => l.task).join(', ')}`, { agent: by, status: 'ok', meta: { head: r.newTip, lanes: group.map((l) => l.task), ...(pt ? { part: pt } : {}) } });
   };
   /** Refused or error: nobody is blamed, every branch left waits (stays queued). */
   let held = null;
@@ -2023,7 +2027,28 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     let fullCancelled = false;
     if ((fullFirst || rulesFirst) && await fullsOnTarget('idle')) { hold(set, { status: 'cancelled', why: 'the train was cancelled during the full run' }); fullCancelled = true; }
     // The rounds still to run, in order (a round starts with a complete land run of its lanes).
-    const pending = fullCancelled || !set.length ? [] : [set];
+    // 2.99 (a): engines.<x>.landParts (off by default): a green batch of lanes whose Play Mode class is skip and lanes that
+    // need a play run lands in two rounds, the skip lanes first (no Play Mode), then the rest on the moved target. Only when
+    // part 1 keeps its green cheaply: its tree checked again (recheck) must reuse kept shards or parts, PART_RECHECK_MIN at most.
+    const parts = await (async () => {
+      if (s.cfg.landParts !== true || !rulesGreen || set.length < 2) return null;
+      const skip = set.filter((l) => laneClass({ repo, target, cfg: s.cfg, lane: l }) === 'skip');
+      const rest = set.filter((l) => !skip.includes(l));
+      if (!skip.length || !rest.length) return null;
+      const no = (why) => { log(`[unity-train] ${id}: engines.${engine}.landParts: the batch lands whole: ${why}`); return null; };
+      if (!treeGreen(skip, tip0)) {
+        if (!(rcfg.shards || perPartOn(rcfg))) return no('the rules check is one whole command, so part 1 could not be told the rules are green without its own rules stage');
+        const pl = await rulesPlan(root, { engine, branches: skip.map((l) => l.branch), env });
+        if (pl.error || pl.minutes === null || pl.minutes > PART_RECHECK_MIN) return no(`part 1 (${skip.map((l) => l.task).join(', ')}) would run the rules check again for ${pl.error ? `an unknown time (${pl.message})` : pl.minutes === null ? 'an unknown time (a shard or part has no measured run)' : `about ${pl.minutes} min`}, more than ${PART_RECHECK_MIN} min`);
+      }
+      skip.forEach((l) => partOf.set(l.task, 'part 1 of 2 (skip lanes)'));
+      rest.forEach((l) => partOf.set(l.task, 'part 2 of 2 (lanes with Play Mode)'));
+      const m = `the batch lands in parts (engines.${engine}.landParts): part 1 of 2 (skip lanes, no Play Mode): ${skip.map((l) => l.task).join(', ')}; part 2 of 2 (lanes with Play Mode), on the target part 1 moved: ${rest.map((l) => l.task).join(', ')}; the Edit Mode stage runs once per part`;
+      log(`[unity-train] ${id}: ${m}`);
+      ev('land_parts', id, m, { agent: by, meta: { part1: skip.map((l) => l.task), part2: rest.map((l) => l.task) } });
+      return [skip, rest];
+    })();
+    const pending = fullCancelled || !set.length ? [] : parts || [set];
     let rounds = 0;
     let again; let isFlaky; let fRetries; let krOn;
     const bisectMax = bisectCap();
@@ -2059,7 +2084,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         const group = lanesOf(st.group);
         const firstRun = results[0]?.r || null;
         const tests = st.tests ? retryNames(st.tests) : null;
-        let what = 'land run';
+        let what = partOf.has(st.group?.[0]) ? `land run, ${partOf.get(st.group[0])}` : 'land run';
         let o = {};
         if (st.step === 'retry') {
           if (!st.known) stageRetried = true;

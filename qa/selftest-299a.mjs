@@ -260,6 +260,43 @@ export default () => { fs.writeFileSync(path.join(${JSON.stringify(path.join(S, 
       await guard('2.99 (f) a by-name run that does not end within engines.unity.byNameMin is cut; the event says "the by-name run was cut after 0.05 min: the land script seems to run more than the named tests", and the land run without the suspect follows (T-1 lands, T-2 handed back), with no halving search (fails before this fix: the run went on for as long as the land script took, then counted as an error that held every lane)', () => [
         /the by-name run was cut after 0\.05 min .*the land script seems to run more than the named tests \(see docs\/NATIVE-ENGINE\.md, by-name runs\)/.test(cut?.msg || '') && runs.length === 3 && runs[2].srcs.join() === 'port/a' && runs[2].probe === null && r1.landed?.join() === 'T-1' && r1.handed?.map((h) => h.task).join() === 'T-2' && !r1.logs?.some((l) => /bisect/.test(l)) && secs < 110, J({ r1, runs, secs, cut })]);
     }
+    // ================= (h) engines.<x>.landParts: a mixed batch lands in two rounds, one rules check =================
+    for (const on of [true, false]) {
+      resetState();
+      const E = engineRepo({ 'port/a': RULES_LANE, 'port/v': { 'Art/View/V.txt': 'v2\n' } });
+      const ctl = path.join(T, `ctl-h${on ? 'on' : 'off'}`);
+      setEngines({ unity: cfgFor(E, ctl, rulesOf(ctl), { play: { focus: { skip: ['^Game/Rules/'] } }, ...(on ? { landParts: true } : {}) }) });
+      queue(E, [['T-2', 'port/v'], ['T-1', 'port/a']]);
+      const r1 = probe(TRAIN(ctl));
+      const runs = lines(`${ctl}-runs.jsonl`);
+      const rr = lines(`${ctl}-rules.jsonl`);
+      const landed = events(/\.landed$/).map((e) => e.msg);
+      if (on) {
+        await guard('2.99 (h1) engines.unity.landParts on, a batch of a skip lane (T-1) and a lane that needs Play Mode (T-2): two land runs, part 1 (T-1) with STUDIO_PLAY_MODE=skip, then part 2 (T-2) on the moved target; both told STUDIO_RULES_GREEN=1 by one rules check (no shard runs again); the landed events say "part 1 of 2 (skip lanes)" (fails before this fix: the setting did not exist; the skip lane waited for the Play Mode of the whole batch)', () => [
+          r1.landed?.join() === 'T-1,T-2' && runs.length === 2 && runs[0].srcs.join() === 'port/a' && runs[0].play === 'skip' && runs[0].green === '1' && runs[1].srcs.join() === 'port/v' && runs[1].play !== 'skip' && runs[1].green === '1' && rr.length === 2 && landed.some((m) => /part 1 of 2 \(skip lanes\): T-1/.test(m)) && landed.some((m) => /part 2 of 2/.test(m)), J({ r1, runs, rr, landed })]);
+      } else {
+        await guard('2.99 (h2) engines.unity.landParts unset (the default): the same mixed batch lands whole on one land run, as before (fails before this fix: it did too; this pins the default)', () => [
+          r1.landed?.length === 2 && runs.length === 1 && runs[0].green === '1' && !events(/\.land_parts$/).length, J({ r1, runs })]);
+      }
+    }
+    // ================= (h3, h4) landParts with one whole rules command: a kept full pass of part 1's tree, or no split =================
+    for (const touch of [false, true]) {
+      resetState();
+      const E = engineRepo({ 'port/a': RULES_LANE, 'port/v': { 'Art/View/V.txt': 'v2\n', ...(touch ? { 'Sim/Move/Move.cs': 'class Move { int z; }\n' } : {}) } });
+      const ctl = path.join(T, `ctl-h${touch ? 4 : 3}`);
+      const rules = rulesOf(ctl); delete rules.shards; delete rules.focus;
+      setEngines({ unity: cfgFor(E, ctl, rules, { play: { focus: { skip: ['^Game/Rules/'] } }, landParts: true }) });
+      queue(E, [['T-2', 'port/v'], ['T-1', 'port/a']]);
+      const r1 = probe(TRAIN(ctl));
+      const runs = lines(`${ctl}-runs.jsonl`);
+      if (!touch) {
+        await guard('2.99 (h3) landParts on, one whole rules command, the lane that needs Play Mode changes only files under rules.ignore: part 1\'s tree has the batch\'s kept full pass, so the batch lands in two parts, both told STUDIO_RULES_GREEN=1 (mode full), part 1 with Play Mode skipped (fails before this fix: the setting did not exist)', () => [
+          r1.landed?.join() === 'T-1,T-2' && runs.length === 2 && runs[0].play === 'skip' && runs.every((x) => x.green === '1' && x.mode === 'full'), J({ r1, runs })]);
+      } else {
+        await guard('2.99 (h4) landParts on, one whole rules command, and part 1\'s tree differs from the checked one where the rules tests read: the batch lands whole on one land run and one log line says why (fails before this fix: the setting did not exist)', () => [
+          r1.landed?.length === 2 && runs.length === 1 && runs[0].green === '1' && r1.logs?.some((l) => /landParts: the batch lands whole: the rules check is one whole command/.test(l)), J({ r1, runs })]);
+      }
+    }
   } finally {
     for (const r of fs.readdirSync(T).filter((n) => /^repo-/.test(n))) g(path.join(T, r), 'worktree', 'prune');
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }
