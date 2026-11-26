@@ -101,6 +101,17 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   lanes on the checked target. A land script may use that to skip its own copy of the same tests. 2.91: with
   `rules.paths` or `rules.ignore` set, a target that moved only where the rules tests do not read (a land script's own
   record commit) still counts as the checked target; one log line names the two tips. Without them any move loses it.
+- **A land group that is part of the checked batch (2.99).** After a red land run drops a lane, the land run of the
+  lanes left is no longer the checked batch. The train then asks, in this order, and stops at the first answer: the
+  train's own green (exactly the checked lanes); a kept full pass of the group's tree (2.96); a rules check of the
+  group's own tree, as it would land. That last one runs only with `rules.shards` or a per-part `rules.focus`: kept
+  shards and parts are reused in seconds and only the others run. The log says `N of M shards kept, K re-run (x min)`.
+  Green: the land run gets `STUDIO_RULES_GREEN=1` and the mode of that check. Red: the lane it names is handed back as
+  any rules red, and the round starts again with the lanes left. A check that judges no lane (red on the target
+  itself): the land run runs its own rules stage. A studio with one whole rules command is not checked again: its land
+  script's own stage may be the cheaper run. Shards kept by what they read (`keep: "reads"`) also read the files no
+  shard takes, and the `rest` shard reads the whole tree: a dropped lane whose files are outside `rules.ignore` (or
+  `rules.paths`) makes them all run again. Put art and UI folders the rules tests never read under `rules.ignore`.
 - A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane. That lane is
   handed back with cause `rules`, the failing test names and the command's last lines, and the rest is checked again.
   `STUDIO_ENGINE_RULES_MAX_RUNS` (12) bounds the runs for one batch; past it the lanes left go to the land run unjudged.

@@ -5570,6 +5570,14 @@ if (inShard('selftest-298e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.99 (a): what one red lane costs: the land group checked again on its own tree, by-name runs that never widen.
+if (inShard('selftest-299a')) {
+  const dir = copyRepo();
+  const { selftest299A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-299a.mjs')).href);
+  await selftest299A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

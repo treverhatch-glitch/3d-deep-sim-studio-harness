@@ -25,7 +25,7 @@ import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeComman
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets, perPartOn } from './engine-rules.mjs';
 import { noteUnmatched, proposeGaps } from './play-gaps.mjs';
 import { compileSearchOf, compileSearch, compileAt, compilerLines } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
@@ -1361,6 +1361,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // handed back with cause 'rules'; a check that is red on the target itself judges nobody. The land run then gets STUDIO_RULES_GREEN=1 while it
   // lands exactly the checked batch on the checked target with the checked inputs (re-looked at right before the land run).
   let rulesGreen = null;
+  // A lane the rules check refuses (here, or when a land run's group is checked again: 2.99) is handed back with its cause.
+  const dropRules = (d) => drop(d.lane, d.compile ? `refused before the land run: ${noCompileText({ lane: d.lane, ...d.compile }, { target, engine, cc: { source: 'rules.build', command: rcfg.build.command }, where: 'which go on in this train' })}` : `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (bring ${target} in first: ${targetMergeCommand(d.lane.task)}), then task done ${d.lane.task} --train again.`, { cause: d.compile ? 'compile' : d.ratchet ? 'ratchet' : 'rules', ...(d.compile ? { evidence: { files: d.compile.files } } : {}) });
   if (set.length) fresh('the rules check');
   {
     const rc = rcfg;
@@ -1387,7 +1389,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       if (rg.noJudge) ev('rules_no_judge', id, `the rules check judged no lane${rg.noJudge.n > 1 ? ` (${rg.noJudge.n} trains in a row, ${Math.round(rg.noJudge.minutes)} min spent)` : ''}: ${rg.why}`, { agent: by, to: 'producer', status: 'warn', meta: { n: rg.noJudge.n, minutes: rg.noJudge.minutes, timeout: Boolean(rg.timedOut), fix: rg.noJudge.fix } });
       if (rg.noJudge && rg.calibration === 'red' && !rg.timedOut) targetRedTask(root, { engine, target, source: 'rules', tests: rg.redTests, why: rg.noJudge.why, train: id }); else if (rg.ran) targetRedClear(root, engine, 'rules');
       // 2.98: a lane whose build fails (rules.build) is a compile red, said as the compile search says one.
-      for (const d of rg.dropped) drop(d.lane, d.compile ? `refused before the land run: ${noCompileText({ lane: d.lane, ...d.compile }, { target, engine, cc: { source: 'rules.build', command: rc.build.command }, where: 'which go on in this train' })}` : `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (bring ${target} in first: ${targetMergeCommand(d.lane.task)}), then task done ${d.lane.task} --train again.`, { cause: d.compile ? 'compile' : d.ratchet ? 'ratchet' : 'rules', ...(d.compile ? { evidence: { files: d.compile.files } } : {}) });
+      for (const d of rg.dropped) dropRules(d);
       set = rg.kept;
       // 2.98: a build fault twice is no answer: nobody is handed back, the batch stays queued for the next train.
       if (rg.notJudged) { for (const l of set) defer(l, `the rules check was ${rg.why}`); ev('rules_not_judged', id, `the rules check was ${rg.why}`, { agent: by, to: 'producer', status: 'warn', meta: { line: rg.notJudged, lanes: set.map((l) => l.task) } }); set = []; }
@@ -1455,6 +1457,26 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     } catch { return null; }
   };
   /**
+   * 2.99 (a): a land group that is part of the checked batch (a lane was dropped, or the batch lands in parts) and lost the
+   * train's green is checked again on the tree it would land, the lanes as they would land. Kept shards (keep "reads") and
+   * parts answer in seconds; only the others run. A studio with one whole rules command is not checked again (its land
+   * script's own stage may be cheaper). { green, mode, said, dropped, rg } or null when not asked.
+   */
+  const recheck = (group, tip) => {
+    const ids = new Set(String(rulesGreen?.tasks || '').split(','));
+    if (!rcfg || !rulesGreen || !group.length || !group.every((l) => ids.has(l.task)) || !(rcfg.shards || perPartOn(rcfg))) return null;
+    const byName = s.many || group.length === 1;
+    const lanesNow = group.map((l) => (byName ? { ...l, head: headOf(repo, l.branch) || l.head } : l));
+    const t0 = Date.now();
+    const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip, lanes: lanesNow, cfg: rcfg, from: fromAll, extraFrom: laneSources(root, lanesNow), owe: true, root, id: `${id}-again`, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine, { union }) });
+    spent.rules += Date.now() - t0;
+    const n = rg.shards?.n || rg.parts || 0;
+    const kept = rg.shards ? rg.shards.kept : rg.reused || 0;
+    const said = `${n ? `${kept} of ${n} ${rg.shards ? 'shards' : 'parts'} kept, ${Math.max(0, n - kept)} re-run` : `${rg.runs} run(s)`} (${Math.round((Date.now() - t0) / 6000) / 10} min)`;
+    const green = Boolean(rg.green) && !rg.dropped.length;
+    return { green, mode: rg.mode === 'shards' ? 'focus' : rg.mode || 'full', head: rg.green || null, said, dropped: rg.dropped, why: rg.why };
+  };
+  /**
    * One land run of `group` on the target as it is now (refused runs tried again). The gate's result, checked. opts.play: the Play Mode
    * selection to reuse (a retry of a red play stage runs with the same filter). opts.retry: { stage, tests } for the retry of a red stage:
    * the land command is told to re-run only those tests (STUDIO_LAND_RETRY*; for a Unity play stage also STUDIO_UNITY_PLAYMODE_ARGS).
@@ -1478,6 +1500,15 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const noLand = alone || Boolean(opts.noLand);
     const named = [...(opts.retry?.tests || [])].sort().join(';');
     const kind = alone ? (opts.full ? 'full' : `probe:${named}`) : noLand ? `name:${named}` : null;
+    // 2.96: a group whose tree as it would land has a kept full rules pass (same command and inputs) is told green too.
+    const kept0 = !noLand && rcfg && !opts.full && !(rulesGreen && rulesGreen.tasks === group.map((l) => l.task).join(',')) ? treeGreen(group, tip) : null;
+    // 2.99 (a): else a group of the checked batch that lost the green is checked again (recheck); a lane it refuses goes back.
+    const lost0 = !noLand && !opts.full && rulesGreen && !kept0 ? rulesGreen.lost(group, tip) : '';
+    const again = lost0 ? recheck(group, tip) : null;
+    if (again) {
+      log(`[unity-train] ${id}: ${what}: the rules check of this train does not answer for it (${lost0}); checked again on its tree: ${again.said}: ${again.green ? 'green' : again.why}`);
+      if (again.dropped.length) { for (const d of again.dropped) dropRules(d); return { status: 'rules-dropped', ok: false, why: again.why, failures: [] }; }
+    }
     if (noLand) {
       let head0 = tip;
       let u1 = false;
@@ -1526,16 +1557,15 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     };
     let r = null;
     let knownRedUsed = null;
-    // 2.96: a group whose tree as it would land has a kept full rules pass (same command and inputs) is told green too.
-    const kept0 = !noLand && rcfg && !opts.full && !(rulesGreen && rulesGreen.tasks === group.map((l) => l.task).join(',')) ? treeGreen(group, tip) : null;
     try {
       for (let a = 0; ; a += 1) {
         // 2.97: a rules check that passed in this train and is not used here is said once, with why.
         const fullWhy = alone && opts.full ? String(opts.full) : '';
         const lost = !rulesGreen ? 'no rules check passed in this train' : fullWhy ? `a full land run is due (${fullWhy})` : noLand ? 'this run lands nothing' : rulesGreen.lost(group, tip);
         const greenUsed = !noLand && !lost;
-        const checked = greenUsed || (!noLand && Boolean(kept0));
-        if (rulesGreen && lost && !kept0 && a === 0 && (!noLand || fullWhy)) log(`[unity-train] ${id}: the rules check passed in this train, but this land run is not told the rules are green: ${lost}; it runs its own rules stage`);
+        const checked = greenUsed || (!noLand && Boolean(kept0 || again?.green));
+        if (again?.green && a === 0) log(`[unity-train] ${id}: the land run is told the rules are green by the check of its own tree (${again.said})`);
+        if (rulesGreen && lost && !kept0 && !again?.green && a === 0 && (!noLand || fullWhy)) log(`[unity-train] ${id}: the rules check passed in this train, but this land run is not told the rules are green: ${lost}; it runs its own rules stage`);
         if (kept0 && a === 0) log(`[unity-train] ${id}: ${group.map((l) => l.task).join(' + ')} on ${target} at ${short(tip)} is a tree with a kept full rules pass (${String(kept0.at || '').slice(0, 16)}): the land run is told the rules are green`);
         if (checked && !kept0 && a === 0 && rulesGreen.tip !== tip) log(`[unity-train] ${id}: the rules green stands: ${target} moved (${short(rulesGreen.tip)} -> ${short(tip)}) only ${rulesGreen.scope}, where the rules tests do not read`);
         // Once a day (STUDIO_ENGINE_FULL_LAND_HOURS) a land run is told nothing that lets it skip its own tests (no STUDIO_RULES_GREEN, no Edit Mode
@@ -1559,7 +1589,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         // 2.85: a full play stage says why, naming the paths no play.focus.map entry takes.
         else if (play.unmatched?.length) { log(`[unity-train] ${id}: play stage in full: ${play.why}`); res.playUnmatched = play.unmatched; if (!dryRun) noteUnmatched(root, engine, { train: id, paths: play.unmatchedAll }); }
         const playEnv = { STUDIO_PLAY_MODE: play.mode, ...(play.mode === 'focus' ? { STUDIO_PLAY_FILTER: play.filter, ...(engine === 'unity' ? { STUDIO_UNITY_PLAYMODE_ARGS: `-testFilter "${play.filter}"` } : {}) } : {}) };
-        const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1', ...(opts.part ? { STUDIO_LAND_PART: opts.part } : {}) } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: kept0 ? 'full' : rulesGreen.mode } : {}), ...playEnv };
+        const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1', ...(opts.part ? { STUDIO_LAND_PART: opts.part } : {}) } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: kept0 ? 'full' : greenUsed ? rulesGreen.mode : again.mode } : {}), ...playEnv };
         if (play.mode !== 'focus') { delete landEnv.STUDIO_PLAY_FILTER; delete landEnv.STUDIO_UNITY_PLAYMODE_ARGS; }
         // What the harness tells a land script is its own: nothing of these comes from the train's environment.
         for (const k of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_RETRY', 'STUDIO_LAND_RETRY_STAGE', 'STUDIO_LAND_RETRY_TESTS', 'STUDIO_LAND_PROBE', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI', ...(opts.part ? [] : ['STUDIO_LAND_PART'])]) delete landEnv[k];
@@ -1711,7 +1741,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const now = headOf(repo, target);
       const missing = group.filter((l) => !isAncestor(repo, l.head, now));
       if (missing.length) return { ...r, status: 'error', ok: false, why: `the land command said pass, but ${target} (now ${short(now)}) doesn't contain ${missing.map((l) => `${l.branch} at ${short(l.head)}`).join(', ')}: nothing was closed` };
-      return { ...r, newTip: now };
+      return { ...r, newTip: now, ...(again?.green ? { rulesHead: again.head, rulesMode: again.mode } : {}) };
     }
     return r;
   };
@@ -1762,7 +1792,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     // 2.93: the landed tree's rules answer (rules.landGate's pass, or the checked full green landed unchanged) for the next train.
     if (!dryRun && rcfg) {
       const gk = group.map((l) => l.task).join(',');
-      try { const how = rulesLanded({ root, engine, repo, cfg: rcfg, tip: r.newTip, head: rulesGreen?.tasks === gk ? rulesGreen.head : null, mode: rulesGreen?.mode, stages: r.stages, from: fromAll }); if (how) log(`[unity-train] ${id}: ${how === 'gate' ? `the land run's ${rcfg.landGate} gate passed: kept as a full rules pass of ${short(r.newTip)}` : `the checked full rules pass landed unchanged: it is the full pass of ${short(r.newTip)}`}`); } catch { /* the next train asks again */ }
+      try { const how = rulesLanded({ root, engine, repo, cfg: rcfg, tip: r.newTip, head: r.rulesHead || (rulesGreen?.tasks === gk ? rulesGreen.head : null), mode: r.rulesMode || rulesGreen?.mode, stages: r.stages, from: fromAll }); if (how) log(`[unity-train] ${id}: ${how === 'gate' ? `the land run's ${rcfg.landGate} gate passed: kept as a full rules pass of ${short(r.newTip)}` : `the checked full rules pass landed unchanged: it is the full pass of ${short(r.newTip)}`}`); } catch { /* the next train asks again */ }
     }
     // Old gate builds are pruned (engines.<x>.builds; absent: nothing is touched).
     if (!dryRun) { try { const bc = buildsConfig(engine, { root, env }); if (bc) { const pb = pruneBuilds({ ...bc, root, log }); if (pb?.removed?.length) log(`[unity-train] ${id}: pruned ${pb.removed.length} old build(s) in ${String(bc.dir).split(path.sep).join('/')}; kept ${pb.kept.length}`); } } catch (e) { log(`[unity-train] ${id}: could not prune old builds: ${e.message}`); } }
@@ -2056,6 +2086,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         res.rounds += 1;
         const r = await landGroup(group, what, o);
         await aheadSettle(r);
+        // 2.99 (a): the check of this group's own tree handed a lane back: the round starts again with the lanes left.
+        if (r.status === 'rules-dropped') { const rest = round.filter((l) => live.has(l.task) && !res.landed.includes(l.task)); if (rest.length) pending.unshift(rest); break; }
         // A run that should have landed nothing moved the target: stop, nobody is blamed (landGroup said why).
         if (r.moved) { hold(lanesOf(round.map((l) => l.task).filter((t) => live.has(t) && !res.landed.includes(t))), r); stop = true; break; }
         // The target's own full-run failures are never counted against a lane (2.85), nor narrowed on.
