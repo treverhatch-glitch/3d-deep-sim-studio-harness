@@ -171,6 +171,14 @@ try { acquireHeavy(process.cwd(), 'unity gate EditMode (engine/x)', { kind: 'uni
     const land = evs(/^engine\.land$/).pop() || {};
     await guard('2.99 (b1d) an agent\'s own land run stops at engines.unity.agentLandMin (0.03 min here): "not-run", not red, saying it is not a failure of the work and that the train is the real verify; the engine.land event is a warning and the land command\'s process is gone (by pid) (fails before this fix: the run held the slot up to the land run\'s own 120 min)', () => [
       r.status === 'not-run' && r.code === null && /^stopped at the time limit of an agent's own land run \(0\.03 min, engines\.unity\.agentLandMin\): not a failure of your work\. The train is the real verify/.test(r.why || '') && ended && land.status === 'warn' && land.meta?.status === 'not-run', J({ r, pid, ended, land })]);
+    // No train for this engine (no target): the agent's own run is the verify, so the limit does not apply.
+    const { target: _t, ...noTrain } = cfgFor(E, ctl, { agentLandMin: 0.03 });
+    setEngines({ unity: noTrain });
+    fs.writeFileSync(`${ctl}-sleep`, '4000');
+    const solo = probe(GATE('T-121', 'feat/a'), AGENT);
+    await guard('2.99 (b1f) an engine with no train (no engines.unity.target): an agent\'s own land run that takes longer than agentLandMin is not cut, because there the agent\'s run is the verify (fails before this fix: a studio that lands without a train had every agent land run over 45 min ended as "not-run")', () => [
+      solo.status !== 'not-run' && !/time limit of an agent's own land run/.test(solo.why || ''), J({ solo })]);
+    setEngines({ unity: cfgFor(E, ctl, { agentLandMin: 0.03 }) });
     fs.writeFileSync(`${ctl}-sleep`, '3000');
     const person = probe(GATE('T-121', 'feat/a'), PERSON);
     queue(E, [['T-122', 'feat/b']]);

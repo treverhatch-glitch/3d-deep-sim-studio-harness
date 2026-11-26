@@ -116,8 +116,11 @@ async function emptyLaneWhy(root, engine, task, branch) {
   return c.empty?.length || c.already?.length ? emptyWhy(s.target) : '';
 }
 
-/** engines.<x>.agentLandMin: an agent's own land run's time limit in minutes (default 45; 0 or off: the land run's own). */
-const agentLandMin = (cfg) => (/^(off|0|false|no)$/i.test(String(cfg?.agentLandMin ?? '')) ? 0 : Number(cfg?.agentLandMin) > 0 ? Number(cfg.agentLandMin) : 45);
+/**
+ * engines.<x>.agentLandMin: an agent's own land run's time limit in minutes (default 45; 0 or off: the land run's own).
+ * Only where the engine lands through a train (engines.<x>.target): without one the agent's run is the verify itself.
+ */
+const agentLandMin = (cfg) => (!cfg?.target || /^(off|0|false|no)$/i.test(String(cfg?.agentLandMin ?? '')) ? 0 : Number(cfg?.agentLandMin) > 0 ? Number(cfg.agentLandMin) : 45);
 
 const STATUSES = new Set(['pass', 'red', 'conflict', 'refused', 'error', 'not-run', 'killed']);
 
