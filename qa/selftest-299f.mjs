@@ -145,6 +145,14 @@ console.log(JSON.stringify({ ids: { owner: owner.ask.id, plain: plain.ask.id, no
       J({ bad: r.bad, before: r.before, refused: out(refused).slice(-300), list: listed2.stdout.slice(-400) })]);
     await guard('2.99 (f7) an ask without a condition is never closed by the pass before its deadline, whatever the free disk is: the one with a default waits for its 4 h deadline and is then decided by default as before; one with no default stays open (fails before this fix: n/a, guard)', () => [
       r.s60?.[id.none] === 'open' && r.s60?.[id.noDef] === 'open' && r.sLate?.[id.none] === 'decided' && r.plainLate?.includes(id.none) && r.sLate?.[id.noDef] === 'open', J(r)]);
+
+    // ---- 3. the producer's briefing ----
+    const hb = probe(`import { buildHandoff, renderHandoff } from ${u('harness/handoff.mjs')}; import { splitLine } from ${u('harness/task-checklist.mjs')}; import { parseNextQueue } from ${u('harness/task.mjs')};
+const q = parseNextQueue(); const all = [...q.inProgress, ...q.backlog].map((t) => splitLine(t.id)).filter(Boolean);
+const h = buildHandoff(); console.log(JSON.stringify({ all: all.length, lines: h.splitAdvice, md: renderHandoff(h) }));`);
+    await guard('2.99 (f8) the producer\'s briefing lists the split advice (the same line task show gives) under "Needs you first", at most 3 of the open tasks over the limit (fails before this fix: only the event and task show carried it)', () => [
+      hb.all >= 4 && hb.lines?.length === 3 && hb.lines.every((l) => /^\S+ has \d+ open items: split it \(`npm run task -- split \S+ --every 8`\)$/.test(l))
+        && hb.lines.every((l) => (hb.md || '').includes(`- ${l}`)) && /## Needs you first[^#]*- \S+ has \d+ open items: split it/.test(hb.md || ''), J({ all: hb.all, lines: hb.lines, raw: hb._raw })]);
   } finally {
     try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the OS cleans its temp folder */ }
   }
