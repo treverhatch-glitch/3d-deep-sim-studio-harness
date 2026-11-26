@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { runLimitedSync } from './run-limited.mjs';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { jobDone } from './jobs.mjs';
-import { acquireHeavy, heavyRoot } from './heavy.mjs';
+import { acquireHeavy, heavyRoot, agentEngineRun, trainFirst } from './heavy.mjs';
 import { oomSignature } from './heavy-budget.mjs';
 import { readTrack, logEngine } from './engine.mjs';
 import { infraAbort } from './engine-proof.mjs';
@@ -101,6 +101,23 @@ export function setTaskBranch(taskId, branch, { agent = process.env.STUDIO_LOCK_
   emitEvent({ type: 'task.unity_branch', agent, task: taskId, track: 'engine:unity', msg: `${taskId} lands from the Unity branch ${branch}`, meta: { branch } });
   return { ok: true, why: `${taskId} lands from the Unity branch ${branch}` };
 }
+
+/** 2.98 (b): the words for a lane whose tree adds nothing over the target (a train hands it back; the queue door and 2.99 an agent's own run refuse it). */
+export const emptyWhy = (target) => `empty lane: nothing to land (its tree adds nothing over ${target})`;
+
+/** 2.99 (b): an agent's own land run of `branch`: emptyWhy when its lane adds nothing over the target (as the queue door tests it), else ''. */
+async function emptyLaneWhy(root, engine, task, branch) {
+  const ut = await import('./unity-train.mjs');
+  const s = ut.unityTrainSettings(root, engine);
+  const rev = (b) => (s.error ? '' : String(spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${b}^{commit}`], { cwd: s.repo, encoding: 'utf8', windowsHide: true }).stdout || '').trim());
+  const head = rev(branch);
+  if (!head) return '';
+  const c = ut.chainOnTarget(s.repo, rev(s.target), [{ task, branch, head }], 'agent-run', engine, { union: ut.unionOf(s.cfg) });
+  return c.empty?.length || c.already?.length ? emptyWhy(s.target) : '';
+}
+
+/** engines.<x>.agentLandMin: an agent's own land run's time limit in minutes (default 45; 0 or off: the land run's own). */
+const agentLandMin = (cfg) => (/^(off|0|false|no)$/i.test(String(cfg?.agentLandMin ?? '')) ? 0 : Number(cfg?.agentLandMin) > 0 ? Number(cfg.agentLandMin) : 45);
 
 const STATUSES = new Set(['pass', 'red', 'conflict', 'refused', 'error', 'not-run', 'killed']);
 
@@ -330,8 +347,20 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const tune = (() => { try { return readTune(engine).values; } catch { return {}; } })();
   const flags = Array.isArray(tune['batch-flags']) && et.tune.includes('batch-flags') ? tune['batch-flags'].filter((f) => /^-{1,2}[A-Za-z][A-Za-z0-9_-]*(=[A-Za-z0-9_.:,/-]+)?$/.test(f)) : [];
   const cmd = template.replaceAll('{flags}', flags.join(' ')).replaceAll('{branches}', many ? many.join(' ') : '').replaceAll('{branch}', br ? q(br) : '').replaceAll('{task}', task ? q(task) : '').replaceAll('{target}', cfg.target ? q(cfg.target) : '').replaceAll('{folder}', folder ? q(folder) : '');
-  const timeoutMin = Number(timeoutOverride || cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
+  // 2.99 (b): an agent's own run (not the train's, not a person's) is refused on an empty lane or while the train goes
+  // first, and has a time limit of its own (engines.<x>.agentLandMin): the train is the real verify.
   const { hroot, heavyOpts } = await landHeavyOpts(engine, { env, log });
+  const agent = agentEngineRun(hroot, engine, env);
+  if (agent) {
+    const empty = !many && br ? await emptyLaneWhy(hroot, engine, task, br) : '';
+    const first = empty ? '' : trainFirst(hroot, engine, { env, task });
+    const id = task || '<ID>';
+    if (empty || first) return finish({ status: 'refused', ok: false, code: 3, agentRun: true, why: empty ? `${empty}: ${br} changes no file, so nothing was run. Put the work on ${br}, run npm run engine -- check --task ${id}, then npm run task -- done ${id} --train` : first });
+  }
+  const ownMin = Number(timeoutOverride || cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
+  const agentMin = agent ? agentLandMin(cfg) : 0;
+  const agentLimited = agentMin > 0 && agentMin < ownMin;
+  const timeoutMin = agentLimited ? agentMin : ownMin;
   const landLabel = label || `${engine} land${task ? ` (${task})` : ''}`;
   // 2.96 (a): the run is sampled and its kind (rules stage or not, Play Mode) is what the measured reservation is for.
   const runKind = only === 'compile' ? 'compile' : landKind(env);
@@ -343,7 +372,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
     if (err.code !== 'HEAVY_BUSY') throw err;
     // Free RAM stayed under STUDIO_UNITY_MIN_FREE_GB: Unity never started, so not run (never red).
     if (err.floor) return finish({ status: 'not-run', ok: false, code: 3, infra: { kind: 'ram-floor', text: err.message.replace(/^\[heavy\]\s*NOT RUN\s*/, '') }, why: `not run: ${err.message.replace(/^\[heavy\]\s*NOT RUN\s*/, '')}` });
-    return finish({ status: 'refused', ok: false, code: 3, why: `the machine:heavy lock stayed busy: ${err.message.replace(/^\[heavy\]\s*/, '')}` });
+    return finish({ status: 'refused', ok: false, code: 3, why: `${err.trainFirst ? '' : 'the machine:heavy lock stayed busy: '}${err.message.replace(/^\[heavy\]\s*/, '')}` });
   }
   let r;
   const landStart = Date.now();
@@ -396,12 +425,13 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const out = path.join(REPO_ROOT, '.studio', 'gates', 'out', withGs(et.files.gateLog));
   try { fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, text); } catch {}
   const timedOut = r.error?.code === 'ETIMEDOUT';
-  let m = r.error && !timedOut ? { status: 'error', why: `could not run it: ${r.error.code || r.error.message}` } : mapUnityExit(r.status, { signal: r.signal, timedOut, timeoutMin, exits: cfg.exits && typeof cfg.exits === 'object' ? cfg.exits : null, killedExits: killedExitsOf(cfg) });
+  let m = timedOut && agentLimited ? { status: 'not-run', why: `stopped at the time limit of an agent's own land run (${agentMin} min, engines.${engine}.agentLandMin): not a failure of your work. The train is the real verify: run npm run engine -- check --task ${task || '<ID>'}, then npm run task -- done ${task || '<ID>'} --train` }
+    : r.error && !timedOut ? { status: 'error', why: `could not run it: ${r.error.code || r.error.message}` } : mapUnityExit(r.status, { signal: r.signal, timedOut, timeoutMin, exits: cfg.exits && typeof cfg.exits === 'object' ? cfg.exits : null, killedExits: killedExitsOf(cfg) });
   // An infrastructure abort is "not run", never red.
   let infra = null;
   if ((m.status === 'red' || (m.status === 'error' && !r.error)) && (infra = landInfra(text, { status: r.status, signal: r.signal, timedOut }))) {
     m = { status: 'not-run', why: `not run (${infra.kind}): ${infra.text}; the land command exited ${r.status ?? r.signal ?? '?'} (${m.status} by its contract), but nothing in its output shows a failing test or a compile error: ${WORDS['not-run']}` };
-  } else if (m.status === 'not-run') m = { ...m, why: `not run: ${m.why}` };
+  } else if (m.status === 'not-run' && !(timedOut && agentLimited)) m = { ...m, why: `not run: ${m.why}` };
   // 2.95 (b): a green land run's built player (gates.build.output in its result) is kept for npm run engine -- playtest.
   if (m.status === 'pass' && !only && env.STUDIO_LAND_PROBE !== '1') { try { (await import('./playtest.mjs')).recordLandBuild(engine, stageFile, { cwd, tasks: task ? String(task).split(',') : [] }); } catch { /* a record only */ } }
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');

@@ -20,7 +20,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { withLandLock, matchAny } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
-import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
+import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch, emptyWhy } from './unity-gate.mjs';
 import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeCommand, engineFloor } from './engine-tracks.mjs';
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
@@ -1126,9 +1126,6 @@ function formBatch(sel0, { repick, repo, target, tip, board, holdMod, L, id, eng
     sel = { ...nx, why: `${nx.why}; picked again without ${[...skip].join(', ')} (${skip.size === 1 ? 'it' : 'they'} could not go)` };
   }
 }
-
-/** 2.98 (b): the words for a lane whose tree adds nothing over the target (a train hands it back; the queue door refuses it). */
-const emptyWhy = (target) => `empty lane: nothing to land (its tree adds nothing over ${target})`;
 
 /** 2.94: a kept check ahead's lanes, all queued and unchanged, when the target is the tree it was built on: { train, lanes } or null. */
 function aheadSet(root, engine, queued, { repo, tip, cfg }) {

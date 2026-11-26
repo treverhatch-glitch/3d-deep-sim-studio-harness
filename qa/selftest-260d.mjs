@@ -95,7 +95,7 @@ setTimeout(() => {}, 600000);
           && ev?.agent === 'tester' && ev.meta?.recordedBy === 'opus-bot' && ev.meta?.freed === true && tree.every((p) => ev.meta.killed.includes(p)),
         JSON.stringify({ up: h.up, rec, stillUp, stop: out(stop), tree, alive: tree.filter((p) => !gone(p)), lock: readJson(lockF), ev }).slice(0, 2500)]);
       guard('#5: heavy stop is refused in a worker session (a launched builder role, or a worker agent\'s name) and without --by, and kills nothing then (harness/permission.mjs\'s worker test)', () => [
-        worker.status === 3 && /refused: a launched builder session/.test(out(worker)) && workerName.status === 3 && /builder-s3 is a worker agent/.test(out(workerName)) && noBy.status === 2 && /--by <name>/.test(out(noBy)) && stillUp,
+        worker.status === 3 && /refused: a launched builder session/.test(out(worker)) && workerName.status === 3 && /builder-s3 \(a worker agent\) can't stop heavy work/.test(out(workerName)) && noBy.status === 2 && /--by <name>/.test(out(noBy)) && stillUp,
         JSON.stringify({ worker: out(worker), workerName: out(workerName), noBy: out(noBy), stillUp })]);
       clearUp();
     }
