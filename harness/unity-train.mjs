@@ -1048,6 +1048,11 @@ export function chainOnTarget(repo, base, lanes, id, engine = 'unity', { union =
   return { ...res, head: tip };
 }
 
+/** What a lane was handed back for (.studio/engine handbacks): an unchanged branch is not queued again (queueUnityTask). */
+function recordHandBack(root, engine, lane, { train, why, cause = null, files = [], tests = [], targetAt = null, at = new Date().toISOString() }) {
+  editHandbacks(root, engine, (h) => { h[lane.task] = { train, branch: lane.branch, head: lane.head, reason: `${cause ? `${cause}: ` : ''}${why.split('\n')[0]}`.slice(0, 240), cause: cause || 'red', files, tests, targetAt, at }; });
+}
+
 /** 2.99 (e): engines.<x>.queueRetestHours (6; 0: off): how often at most the waiting lanes are tested against a moved target. */
 export function queueRetestHours(cfg = {}) { const h = Number(cfg?.queueRetestHours ?? 6); return Number.isFinite(h) && h > 0 ? h : 0; }
 const retestFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-queue-check.json`);
@@ -1083,7 +1088,7 @@ export async function retestQueue(root, engine = 'unity', { now = Date.now(), by
     if (!bad) continue;
     delete lanes[e.task];
     const lane = { ...e, head };
-    editHandbacks(root, engine, (h) => { h[e.task] = { train: 'queue-check', branch: e.branch, head, reason: `${bad.cause ? `${bad.cause}: ` : ''}${bad.why.split('\n')[0]}`.slice(0, 240), cause: bad.cause || 'red', files: (bad.files || []).slice(0, 20), tests: [], targetAt: tip, at: new Date(now).toISOString() }; });
+    recordHandBack(root, engine, lane, { train: 'queue-check', why: bad.why, cause: bad.cause, files: (bad.files || []).slice(0, 20), targetAt: tip, at: new Date(now).toISOString() });
     dequeueUnity(root, e.task, engine);
     evTop('dropped', 'queue-check', `${e.task} handed back: ${bad.why.split('\n')[0]}`, { engine, task: e.task, agent: by, to: e.agent, status: 'blocked', meta: { check: 'queue', target: tip, ...(bad.cause ? { cause: bad.cause } : {}) } });
     try { await handBack?.(lane, `Not landed: the ${L} queue check tested it against ${s.target} at ${short(tip)} while it waited: ${bad.why}`, bad.cause ? { cause: bad.cause } : undefined); } catch { /* the event and the record stand */ }
@@ -1329,7 +1334,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       try {
         const tests = (evidence?.tests || []).slice(0, 10);
         const files = [...new Set([...(evidence?.files || []), ...tests.flatMap((t) => testFilesAt(repo, lane.head, testParts(t).cls))])].slice(0, 20);
-        editHandbacks(root, engine, (h) => { h[lane.task] = { train: id, branch: lane.branch, head: lane.head, reason: `${cause ? `${cause}: ` : ''}${why.split('\n')[0]}`.slice(0, 240), cause: cause || 'red', files, tests, targetAt: headOf(repo, target) || null, at: new Date().toISOString() }; });
+        recordHandBack(root, engine, lane, { train: id, why, cause, files, tests, targetAt: headOf(repo, target) || null });
       } catch { /* a record only */ }
     }
     try { dequeueUnity(root, lane.task, engine); } catch {}
