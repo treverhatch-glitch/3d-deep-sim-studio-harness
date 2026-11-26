@@ -82,8 +82,8 @@ export async function selftest299B({ dir, report, tmpRoot }) {
     return { R, GW, heads };
   };
 
-  // The land script's stand-in: records each run; <ctl>-sleep holds ms to wait first (its pid in <ctl>-pid); <ctl>-wait
-  // holds N: it waits until the check ahead has run N rules commands (a condition, never a fixed sleep). Then it merges.
+  // The land script's stand-in: records each run; <ctl>-sleep holds ms to wait first (its pid in <ctl>-pid); with
+  // <ctl>-waitdone it waits until the check ahead is done (a condition, never a fixed sleep). Then it merges.
   const landStub = path.join(T, 'land-stub.mjs');
   fs.writeFileSync(landStub, `import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -92,11 +92,10 @@ const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.em
 const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, green: process.env.STUDIO_RULES_GREEN ?? null }) + '\\n');
 if (fs.existsSync(ctl + '-sleep')) { fs.writeFileSync(ctl + '-pid', String(process.pid)); nap(Number(fs.readFileSync(ctl + '-sleep', 'utf8'))); }
-if (fs.existsSync(ctl + '-wait')) {
-  const want = Number(fs.readFileSync(ctl + '-wait', 'utf8'));
-  const n = () => { try { return fs.readFileSync(ctl + '-rules.jsonl', 'utf8').split('\\n').filter((l) => l.includes('"ahead":true')).length; } catch { return 0; } };
-  for (const until = Date.now() + 90000; Date.now() < until && n() < want; nap(100));
-  fs.rmSync(ctl + '-wait', { force: true });
+if (fs.existsSync(ctl + '-waitdone')) {
+  const done = () => { try { return JSON.parse(fs.readFileSync(${JSON.stringify(path.join(S, '.studio', 'engine', 'unity-rules-ahead-out.json'))}, 'utf8')).state === 'done'; } catch { return false; } };
+  for (const until = Date.now() + 90000; Date.now() < until && !done(); nap(100));
+  fs.rmSync(ctl + '-waitdone', { force: true });
 }
 const before = git(gw, 'rev-parse', 'HEAD').stdout.trim();
 for (const s of srcs) { const m = git(gw, 'merge', '--no-ff', '-m', 'land ' + s, 'refs/heads/' + s); if (m.status !== 0) { git(gw, 'merge', '--abort'); git(gw, 'reset', '-q', '--hard', before); process.exit(2); } }
@@ -119,7 +118,7 @@ console.log(JSON.stringify({ status: r.status, ok: r.ok, code: r.code, why: r.wh
   const TRAIN = `import { runUnityTrain } from ${u('harness/unity-train.mjs')};
 const logs = [];
 const r = await runUnityTrain({ root: process.cwd(), log: (m) => logs.push(String(m)), deps: { handBack: () => {} } });
-console.log(JSON.stringify({ ok: r.ok, landed: r.landed, dropped: r.dropped, batch: r.batch, rules: r.rules || null, logs: logs.filter((l) => /rules|ahead|takes the set|batch|road|shard/.test(l)) }));`;
+console.log(JSON.stringify({ ok: r.ok, id: r.id, landed: r.landed, dropped: r.dropped, batch: r.batch, rules: r.rules || null, logs: logs.filter((l) => /rules|ahead|takes the set|batch|road|shard/.test(l)) }));`;
 
   // ================= 1 (a) an empty lane =================
   {
@@ -179,6 +178,56 @@ try { acquireHeavy(process.cwd(), 'unity gate EditMode (engine/x)', { kind: 'uni
     const train = probe(TRAIN, AGENT);
     await guard('2.99 (b1e) what is never held back or stopped: a person\'s own land run outlives the agents\' 0.03 min limit and passes; the train\'s own land run, started from a worker session with its lane queued, is neither refused nor stopped and lands T-122 (a guard of what must not change: it holds before and after this fix)', () => [
       person.status === 'pass' && train.landed?.join() === 'T-122', J({ person, train })]);
+  }
+
+  // ================= 2: the check ahead and the next batch =================
+  const AUTOS = [{ root: 'Sim', paths: ['Sim/{name}/'], filter: 'Cat={name}' }, { from: 'Game/Core/Unit.{name}.cs', paths: ['Game/Core/Unit.{name}.'], filter: 'Core.{name}' }];
+  const shardRules = (ctl) => ({ test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" ALL`, ahead: true,
+    focus: { test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" "{filter}"`, smoke: 'Smoke', auto: AUTOS, fullEveryHours: 0 },
+    shards: { filters: ['Listed'], rest: 'Rest', keep: 'reads' } });
+  const wholeRules = (ctl) => ({ test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" ALL`, ahead: true });
+  const lanes3 = { 'feat/a': { 'Sim/Move/Move.cs': 'class Move { int a; }\n' }, 'feat/b': { 'Sim/Fees/Fees.cs': 'class Fees { int b; }\n' }, 'feat/c': { 'Game/Core/Unit.Bank.cs': 'class Bank { int c; }\n' } };
+  const aheadLast = () => readJson(path.join(S, '.studio', 'engine', 'unity-ahead-last.json')) || {};
+  // Train 1 lands T-201 while the check ahead runs T-202 to the end; then T-203 is queued (after the check ahead began).
+  const firstTrain = (rules, n) => {
+    resetState();
+    const E = engineRepo(lanes3);
+    const ctl = ctlOf(n);
+    setEngines({ unity: cfgFor(E, ctl, { rules: rules(ctl) }) });
+    queue(E, [['T-201', 'feat/a'], ['T-202', 'feat/b']]);
+    fs.writeFileSync(`${ctl}-waitdone`, '1');
+    const r1 = probe(TRAIN);
+    const n1 = rulesRuns(ctl).length;
+    return { E, ctl, r1, n1, ahead: rulesRuns(ctl).filter((x) => x.ahead).map((x) => x.filter) };
+  };
+  {
+    const { E, ctl, r1, n1, ahead } = firstTrain(shardRules, 'reads');
+    queue(E, [['T-202', 'feat/b'], ['T-203', 'feat/c']]);
+    setEngines({ unity: cfgFor(E, ctl, { batchMax: 2, rules: shardRules(ctl) }) });
+    const r2 = probe(TRAIN);
+    const next = rulesRuns(ctl).slice(n1).map((x) => x.filter);
+    const last = aheadLast();
+    const show = out(spawnSync(process.execPath, ['harness/engine-rules.mjs', 'show', '--engine', 'unity'], { windowsHide: true, cwd: S, env: envOf(), encoding: 'utf8', timeout: 60000 }));
+    await guard('2.99 (b2a) check ahead with rules.shards.keep "reads": the next train takes the normal batch (T-202 and T-203, queued after the check ahead began), reuses the shard greens kept from train 1 and from the check ahead (Cat=Move, Cat=Fees) and runs only the others (Smoke, Core.Bank, Listed, Rest); its log and rules show say the check ahead lent 1 shard green (fails before this fix: the train took only T-202, the set checked ahead, and T-203 rode the train after)', () => [
+      r1.landed?.join() === 'T-201' && ahead.includes('Cat=Fees') && r2.landed?.join() === 'T-202,T-203' && [...next].sort().join() === ['Core.Bank', 'Listed', 'Rest', 'Smoke'].join()
+        && r2.logs?.some((l) => /ran for T-202; the normal pick \(T-202, T-203\) goes: with rules\.shards\.keep "reads"/.test(l)) && r2.logs?.some((l) => /1 shard green\(s\) kept by what they read went to train/.test(l))
+        && last.lent?.shards === 1 && last.lent.to === r2.id && /last lent 1 shard green\(s\) to train/.test(show), J({ r1: r1.landed, ahead, next, last, landed: r2.landed, id: r2.id, show: show.slice(-600) })]);
+    await guard('2.99 (b2c) what must not happen: the check ahead\'s green is never used for a tree it did not check: only a train of exactly the checked set (T-202) takes its result; a train with T-203 never says its result came from the check ahead, and the shard T-203 changes (Core.Bank) runs again on that new tree (a guard of what must not change: it holds before and after this fix)', () => [
+      (r2.landed?.join() === 'T-202' || !r2.logs?.some((l) => /the batch's result came from the check ahead|finished some shards, this train ran the rest/.test(l))) && (!r2.landed?.includes('T-203') || next.includes('Core.Bank')), J({ next, landed: r2.landed })]);
+  }
+  {
+    const { E, ctl, n1 } = firstTrain(wholeRules, 'whole-larger');
+    queue(E, [['T-202', 'feat/b'], ['T-203', 'feat/c']]);
+    setEngines({ unity: cfgFor(E, ctl, { batchMax: 2, rules: wholeRules(ctl) }) });
+    const r2 = probe(TRAIN);
+    const next = rulesRuns(ctl).slice(n1);
+    const w = firstTrain(wholeRules, 'whole-same');
+    queue(w.E, [['T-203', 'feat/c'], ['T-202', 'feat/b']]);
+    const r3 = probe(TRAIN);
+    const next3 = rulesRuns(w.ctl).slice(w.n1);
+    await guard('2.99 (b2b) without reads-keyed shards: a normal pick larger than the set checked ahead goes (T-202, T-203), and its rules check runs on its own tree (one run, not from the check ahead); a normal pick that is not larger (T-203 first, batchMax 1) gives way to the checked set (T-202), which takes the check ahead\'s result and runs no rules test; each log says which road and why (fails before this fix: the checked set was always taken, so the larger batch shrank to T-202)', () => [
+      r2.landed?.join() === 'T-202,T-203' && next.length === 1 && !next[0].ahead && r2.logs?.some((l) => /the normal pick \(T-202, T-203\) is larger, so it goes/.test(l)) && !r2.logs?.some((l) => /the batch's result came from the check ahead/.test(l))
+        && r3.landed?.join() === 'T-202' && !next3.length && r3.logs?.some((l) => /this train takes that set: the normal pick \(1 lane\(s\)\) is not larger/.test(l)) && r3.logs?.some((l) => /the batch's result came from the check ahead/.test(l)), J({ r2, next, r3, next3 })]);
   }
 
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep takes it */ }
