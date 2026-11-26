@@ -273,7 +273,7 @@ export function laneAddDirs({ copy = null, engineDir = null, env = process.env, 
  * harness/launch.mjs starts the argv with no shell on every OS. The prompt goes on stdin for claude, codex and agy;
  * cursor and grok take it as one argument; a prompt too long for the command line becomes an instruction to read the kickoff file.
  */
-export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false, engineDir = null, agent = null, agySettings = null }) {
+export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false, engineDir = null, agent = null, agySettings = null, role = null }) {
   const m = model && model !== 'unknown' ? model : null;
   // A session in a lane copy (.lanes/<agent>) reads studio/ and .studio/ through links to the main checkout; Claude Code
   // refuses a link target outside its working directory, so the launcher names the main checkout's real folders
@@ -285,7 +285,7 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       // STUDIO_CLAUDE_BYPASS=1 skips permission prompts (the clone is the boundary). stream-json keeps every message in the log.
       const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
       // harness/allowlist.mjs: the same list the kickoff prints; each pattern is its own argument after the flag.
-      const allowed = allowedToolsList({ engineDir }); // an engine pass may git add / commit in its own worktree
+      const allowed = allowedToolsList({ engineDir, role }); // an engine pass may git add / commit in its own worktree; 2.99 (D): role-limited studio entries
       const ceiling = sessionLimits().ceilingTurns;
       return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', ...allowed]), ...dirs, '--output-format', 'stream-json', '--verbose', ...(ceiling > 0 ? ['--max-turns', String(ceiling)] : []), ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
     }
@@ -1381,7 +1381,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (reach.bad) launchNotes.push(reach.bad);
     launchNotes.push(agySettings ? `agy reach: ${reach.rules.length} allow-rule(s) for ${addDirs.length} folder(s) in ${path.relative(REPO_ROOT, agySettings).split(path.sep).join('/')} (${reach.from}; STUDIO_AGY_REACH_RULES changes them)` : `agy reach: no allow-rules written (${reach.from === 'off' ? 'STUDIO_AGY_REACH_RULES=off' : 'nothing to add or the file could not be written'}); agy may be denied its engine worktree`);
   }
-  const cmd = custom ? null : toolCommand(tool, { model, file: editFile || file, prompt, effort, addDirs, engineDir: engineLane?.dir || null, aider, stream: agyStream, agent, agySettings });
+  const cmd = custom ? null : toolCommand(tool, { model, file: editFile || file, prompt, effort, addDirs, engineDir: engineLane?.dir || null, aider, stream: agyStream, agent, agySettings, role });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) {
     let regWhy = '';
