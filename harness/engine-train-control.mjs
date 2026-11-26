@@ -147,18 +147,18 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
 
 /** 2.98 (b): engines.<x>.tagsWhenIdle (default true): the automatic start may take a tag group; false: only a person's train --tag. */
 export const tagsWhenIdle = (cfg = {}) => cfg?.tagsWhenIdle !== false;
+/** An engines.<x> hours setting: `def` when unset, 0 when off or not a number above 0. */
+export const hoursSetting = (v, def) => { const h = Number(v ?? def); return Number.isFinite(h) && h > 0 ? h : 0; };
 /** 2.99 (e): engines.<x>.tagMaxWaitHours (24; 0: off): past it, a tag group runs next although untagged lanes wait. */
-export function tagMaxWaitHours(cfg = {}) { const h = Number(cfg?.tagMaxWaitHours ?? 24); return Number.isFinite(h) && h > 0 ? h : 0; }
+export const tagMaxWaitHours = (cfg = {}) => hoursSetting(cfg?.tagMaxWaitHours, 24);
 /** 2.99 (e): when a lane joined its tag group: tagAt (set when the tag was set), else when it was queued. */
 const tagSince = (e) => { const t = Date.parse(e.tagAt || e.at || ''); return Number.isFinite(t) ? t : Infinity; };
 
 /**
- * The one choice of which tag group the automatic start takes (null: none). Lanes in `skip` (waiting for the target) are
- * not counted. No untagged lane waits: the group whose oldest lane joined first (road 'idle'). Else 2.99 (e): that group
- * when it has waited over tagMaxWaitHours (road 'overdue'); `go` is false right after a tag train (`lastTag`), so one
- * untagged train runs between two overdue groups. `held` (Map task -> why, as selectBatch takes it): a held lane does not
- * count; an overdue group whose lanes are all held gives { go: false, blocked: true, why } and starts nothing.
- * { tag, n, oldestAt, road, go, waitedH?, limitH?, why? }.
+ * The one choice of which tag group the automatic start takes (null: none); lanes in `skip` (waiting for the target) and in
+ * `held` (Map task -> why) do not count. No untagged lane waits: the oldest group (road 'idle'). Else the group past
+ * tagMaxWaitHours (road 'overdue'; `go` false right after a tag train, `lastTag`). An overdue group with every lane held:
+ * { go: false, blocked: true, why }. { tag, n, oldestAt, road, go, waitedH?, limitH?, why? }.
  */
 export function nextTag(queue = [], { skip = new Set(), cfg = {}, now = Date.now(), lastTag = null, held = null } = {}) {
   if (!tagsWhenIdle(cfg)) return null;

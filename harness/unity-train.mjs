@@ -22,7 +22,7 @@ import { withLandLock, matchAny } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch, emptyWhy } from './unity-gate.mjs';
 import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeCommand, engineFloor } from './engine-tracks.mjs';
-import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle, tagMaxWaitHours, nextTag } from './engine-train-control.mjs';
+import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle, tagMaxWaitHours, hoursSetting, nextTag } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets, perPartOn, rulesPlan } from './engine-rules.mjs';
@@ -1054,7 +1054,7 @@ function recordHandBack(root, engine, lane, { train, why, cause = null, files = 
 }
 
 /** 2.99 (e): engines.<x>.queueRetestHours (6; 0: off): how often at most the waiting lanes are tested against a moved target. */
-export function queueRetestHours(cfg = {}) { const h = Number(cfg?.queueRetestHours ?? 6); return Number.isFinite(h) && h > 0 ? h : 0; }
+export const queueRetestHours = (cfg = {}) => hoursSetting(cfg?.queueRetestHours, 6);
 const retestFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-queue-check.json`);
 
 /**
