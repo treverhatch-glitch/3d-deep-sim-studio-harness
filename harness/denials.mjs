@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR } from './event.mjs';
 import { scrub } from './secrets.mjs';
-import { allowed } from './allowlist.mjs';
+import { allowedToolsList, ruleMatches } from './allowlist.mjs';
 import { appendLine } from './fsafe.mjs';
 
 export const DENIALS_FILE = () => path.join(STUDIO_STATE_DIR, 'denials.jsonl');
@@ -68,8 +68,6 @@ export function redact(text) {
   return s.length > COMMAND_MAX ? `${s.slice(0, COMMAND_MAX - 1)}…` : s;
 }
 
-const globToRe = (g) => new RegExp(`^${g.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
-const allowedRes = () => allowed().map(([, p]) => globToRe(p)); // 2.83: with the studio's own entries (studio/allowlist.json)
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'shell', 'Shell']);
 const TWO_WORDS = new Set(['git', 'node', 'npx', 'python', 'python3', 'py', 'cargo', 'go', 'dotnet', 'godot', 'docker', 'gh', 'pip', 'pip3', 'unity']);
 
@@ -77,7 +75,7 @@ const TWO_WORDS = new Set(['git', 'node', 'npx', 'python', 'python3', 'py', 'car
  * One denial as { command, key, why }: the redacted summary, the group it counts under (a pattern a person could
  * allow) and why it was refused, as far as the harness can tell.
  */
-export function describe(tool, input = {}) {
+export function describe(tool, input = {}, role = null) {
   if (SHELL_TOOLS.has(tool)) {
     const cmd = String(input.command ?? input.script ?? '');
     const command = redact(cmd);
@@ -88,13 +86,17 @@ export function describe(tool, input = {}) {
     const first = trimmed.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '').split(/;|&&|\|\||\|/)[0].trim();
     const words = first.split(/\s+/).filter(Boolean);
     const prog = path.basename(String(words[0] || '').replace(/^["']|["']$/g, '')).replace(/\.(exe|cmd|bat)$/i, '');
+    // 2.99 (D): a quoted program ("C:/Program Files/…/tool.exe") or PowerShell's call operator (& …) keeps the whole
+    // program, so the key reads like the rule that would allow it (it was cut at the first space: Bash(Program *)).
+    const whole = /^(&\s+)?("[^"]*"|'[^']*')(?=\s|$)/.exec(first) || /^(&\s+)(\S+)/.exec(first);
     let head = prog || '(empty)';
-    if (['npm', 'pnpm', 'yarn'].includes(prog) && words[1] === 'run' && words[2]) head = `${prog} run ${words[2]}`;
+    if (whole) head = `${whole[1] ? '& ' : ''}${whole[2]}`;
+    else if (['npm', 'pnpm', 'yarn'].includes(prog) && words[1] === 'run' && words[2]) head = `${prog} run ${words[2]}`;
     else if (['npm', 'pnpm', 'yarn'].includes(prog) && words[1]) head = `${prog} ${words[1]}`;
     else if (TWO_WORDS.has(prog) && words[1] && !words[1].startsWith('-')) head = `${prog} ${words[1]}`;
-    head = redact(head).slice(0, 60);
-    // The launcher's list is Bash patterns only (allowlist.mjs): another shell tool is never on it.
-    const onList = tool === 'Bash' && allowedRes().some((re) => re.test(first));
+    head = redact(head).slice(0, whole ? COMMAND_MAX : 60);
+    // The launcher's rules for this tool and role (allowlist.mjs, with the studio's own entries).
+    const onList = allowedToolsList({ role }).some((r) => r.startsWith(`${tool}(`) && ruleMatches(r.slice(tool.length + 1, -1), first, { ci: tool === 'PowerShell' }));
     const why = chained ? 'chained (one command per call)' : prefixed ? 'prefixed (VAR=x or cd … first)' : variable ? 'uses a variable ($…)' : onList ? 'on the list, refused anyway (a hook or a rule)' : 'not on the list';
     return { command, key: `${tool}(${head} *)`, why, candidate: !chained && !prefixed && !variable && !onList };
   }
@@ -124,7 +126,7 @@ export function recordDenials({ log, logFile = null, from = 0, task = null, agen
   const ts = new Date(now).toISOString();
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
   for (const d of found) {
-    const x = describe(d.tool, d.input);
+    const x = describe(d.tool, d.input, role);
     appendLine(DENIALS_FILE(), JSON.stringify({ ts, task: task || null, agent: agent || null, role: role || null, tool: d.tool, command: x.command, key: x.key, why: x.why, candidate: x.candidate }));
   }
   return found.length;

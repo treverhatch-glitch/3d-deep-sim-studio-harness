@@ -5578,6 +5578,15 @@ if (inShard('selftest-299c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+
+// 2.99 (d): a studio's own tool command with a spaced program path: quoted Bash and PowerShell rules, roles, the spelling.
+if (inShard('selftest-299d')) {
+  const dir = copyRepo();
+  const { selftest299D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-299d.mjs')).href);
+  await selftest299D({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
