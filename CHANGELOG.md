@@ -4,6 +4,24 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.99.0] — 2026-11-26
+Mixed trains that don't stall, checks that run only what changed: the overseer's 14 items after two days on 2.98, with
+the owner's order to cut what is not used. Details: docs/RELEASE-2.99.0.md.
+- **One red lane costs one extra land run:** the group without it is checked again on its own tree (kept shards
+  reused) and told green; the by-name run runs only the stage its names came from, has a time limit
+  (`byNameMin`), and is skipped when the failing tests are the lane's own new tests.
+- **The train goes first:** an agent's own engine run does not start while the train runs or lanes wait, is refused
+  on an empty lane, and has its own time limit (`agentLandMin`).
+- **The check ahead lends its shard greens** to the next train's normal batch instead of fixing the batch.
+- **Play Mode for a mixed batch** runs the mapped fixtures, not the whole stage; `play.times` shows what a fixture costs.
+- **A studio's allowed tool** works in the spellings a session types (quoted, both shells); an entry can name roles.
+- **A tag group runs after a day** (`tagMaxWaitHours`), **waiting lanes are tested against the target**
+  (`queueRetestHours`), and listed files merge by "newer wins" (`merge.newer`).
+- **Long checklists** are worked one item at a time and split on advice; **an ask can clear by itself** (`--clear-when`).
+- `engines.<x>.landParts` (off): a mixed batch lands in two parts.
+- **Removed:** three commands nobody ran (`division`, `logs`, `commands-run`), the usage marks only one of them read,
+  the `event:sh` alias, and the rules each new mechanism replaced.
+
 ## [2.98.0] — 2026-11-24
 Keep the line full and stop losing hours: the overseer's 17 items after three days on 2.97, with the owner's order to
 take out what is replaced. Details: docs/RELEASE-2.98.0.md.
@@ -54,28 +72,15 @@ Details: the 2.96.0 release notes, in git history.
 - **`npm run agent -- smoke`; `npm run upgrade` refuses while a train runs.**
 - **Size:** harness code is 1,497 lines larger than 2.95; a War Room remnant and two dead exports removed.
 
-## [2.95.0] — 2026-11-18
-The full rules check in shards and a playtest build in one command (the overseer's list, the last upgrade before the
-owner's playtest). One full run of a live studio's rules tests had grown to 18.9 GB in one process.
-Details: the 2.95.0 release notes, in git history.
-- **`rules.shards`:** a full rules check runs one test command per shard, one at a time, with a green kept per shard
-  (for the exact tree by default; `keep: "reads"` across batches that touch other shards). Full only with `rest`.
-- **`rules.peak`:** the test command's own peak memory, read from the file it writes, replaces the 4 GB guess.
-- **`focus.auto`** takes names from files and may be a list. **`rules.ahead`** goes shard by shard and says when it
-  did not start.
-- **`npm run engine -- playtest`:** the newest green land run's build in one fixed folder, with `PLAYTEST.md` and a
-  shortcut. **`engines.<x>.switches`:** `Systems ON: n of m` on the status pages.
-- **No new session on a task whose queued branch waits for another task.** `agent list` shows why a start died.
-- **Size:** harness code is 866 lines larger than 2.94; nothing was removed this round.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.95.0** (2026-11-18): The full rules check in shards (`rules.shards`, a green kept per shard) and a playtest build in one command; `Systems ON: n of m` on the status pages.
 - **2.94.0** (2026-11-18): The next batch is checked while the land run runs (`rules.ahead`); scorecards tell landed from closed; one count for "engine tasks that can start".
 - **2.93.0** (2026-11-18): One rules check per train. The check runs the batch first and a landed tree keeps its green; any agent can port for the engine; `task after`, `train slice`, `task duplicate`; a command past its time limit is ended with everything it started.
 - **2.92.0** (2026-11-17): Bad news at the queue door, not hours later. The compile search runs when a branch is queued; the check before queueing judges the branch merged with the target; a land run red on a compiler error hands back the branch that changed that file.
 - **2.91.0** (2026-11-17): No full run ahead of a waiting batch. A due full run waits for an empty queue; `rules.ignore` lets a rules pass survive a record commit; release branches merge with a merge commit.
 - **2.90.0** (2026-11-16): The overseer's list. The rules check's time limit follows the suite; a compile error is searched with the compile command; `preQueue`, `blame`, `rules.first`; two land runs at once; slices.
-- **2.89.0** (2026-11-16): Which functions a studio runs. Each harness command records the functions it called (`.studio/usage/functions/<version>.tsv`); `npm run commands-run -- --functions` shows what ran and what did not.
+- **2.89.0** (2026-11-16): Which functions a studio runs. (Removed in 2.99: nobody read the record.) Each harness command records the functions it called (`.studio/usage/functions/<version>.tsv`); `npm run commands-run -- --functions` shows what ran and what did not.
 - **2.88.0** (2026-11-16): One reading of "landed" for every count (web train, engine train, both, closes), and one module of small helpers.
 - **2.87.0** (2026-11-16): Shorter, same behaviour. One length rule for comments (9,431 lines to 5,151), one test kit for 244 test files, finished notes removed.
 - **2.86.1** (2026-11-16): a run of the engine target alone that moved the target is judged by its result (a daily full run had been thrown away).

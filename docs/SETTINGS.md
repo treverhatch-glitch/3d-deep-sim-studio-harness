@@ -967,7 +967,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_TRAIN_REFRESH` · no simple default · harness/train-refresh.mjs, qa/selftest-276i.mjs, qa/selftest-278h.mjs · [RELEASE.md:198](RELEASE.md)
 - `STUDIO_TRAIN_RELATED_FIRST` · no simple default · harness/train.mjs, qa/selftest-269p.mjs · [WORK-ORGANIZATION.md:210](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_RESERVE` · no simple default · harness/heavy-budget.mjs, qa/selftest-276j.mjs, qa/selftest-277p.mjs · [WORK-ORGANIZATION.md:357](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_RESTARTED` · no simple default · harness/train-gate.mjs, qa/selftest-297d.mjs · [RELEASE-2.97.0.md:34](RELEASE-2.97.0.md)
+- `STUDIO_TRAIN_RESTARTED` · no simple default · harness/train-gate.mjs, qa/selftest-297d.mjs · [WORK-ORGANIZATION.md:140](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_RIDE_ALONG` · no simple default · harness/task.mjs, qa/selftest-263i.mjs, qa/selftest-265s.mjs (+1 more) · [WORK-ORGANIZATION.md:150](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_SLOT_PRIORITY_MIN` · no simple default · harness/heavy.mjs, harness/train-daemon.mjs · [WORK-ORGANIZATION.md:344](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_STALE_MIN` · default `360` · harness/heavy-budget.mjs, harness/janitor.mjs, harness/train-daemon.mjs (+4 more) · undocumented

@@ -26,55 +26,15 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **2.92:** "task lane gives each builder its own folder" now waits for the thing itself. The same change to "the supervisor starts a fresh agent per task" was withdrawn (the next check, "--lanes auto", then failed 2 runs in 8: only one lane got its agent, even with a 90 s wait; cause not found). Left: that check, `2771a`, the tester drive, `290b` second gate, `277p` "someone moves main", "two builders without lanes", "--lanes auto".
 - **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
 
-### P-367 — the next batch waited unchecked through the whole train before it · fixed 2.94 (`rules.ahead`, off by default, untested on a real engine)
-- **Evidence:** a studio's trains: one rules check (about an hour), then one land run (one to two hours); the lanes queued for the next train were checked only after both.
-- **Fix:** with `rules.ahead` the next batch's rules check runs beside the land run when free memory allows; kept only when the land run lands the batch unchanged. `qa/selftest-294a.mjs`.
-
-### P-368 — the scorecards called a closed task "landed" · fixed 2.94
-- **Evidence:** `npm run score` and the brief counted every `task.done` under "landed", so planning and watch tasks, duplicates and forced closes read as landed work.
-- **Fix:** "landed" is work that went through a train; "closed without a landing" is its own number. `qa/selftest-294c.mjs`. The autonomy badge still counts closes (its bars were set on that number).
-
-### P-369 — on Windows the check ahead ended with the train that started it · fixed 2.94 (before the merge)
-- **Evidence:** pull request 96, first online run, Windows only: `294a` (e) red. The check ahead was started and then dropped, the next train ran the same tests again, and the unit crashed removing a folder a leftover process held. On Windows a child that is not started detached ends when its parent's process ends; the check ahead was detached everywhere else.
-- **Fix:** it is started detached on every system. The unit's clean-up retries a held folder, as `292a` does.
-
 ### P-370 — on Windows a train cancel started from a cut-down environment could not read the process list · open (the unit fixed 2.94, before the merge)
 - **Evidence:** pull request 96, second online run and its re-run, Windows only: `294a` (g) red twice the same way. `train cancel` said "the process list could not be read: ETIMEDOUT" (the one PowerShell call took over 16 s), so the train was not ended and neither was the check ahead. `284u` runs the same cancel on the same runner and passes: it passes Windows' own system variables through to its helpers (2.84), and `294a` did not.
 - **Fix:** `294a` passes them through, as the fifteen engine units since 2.84 do. Nothing in `harness/` changed. The third online run passed with them, every check of `294a` green on Windows.
 - **2.96, measured on an online Windows machine:** from a unit started under a bash shell, a PowerShell that calls no cmdlet answers in 0.3 s and a `[wmisearcher]` query in 0.1 s, while `Get-CimInstance Win32_Process` printed nothing in 19 s. `PSModulePath` there begins with a large module folder; a cmdlet from a module makes PowerShell search those folders first, which is the likely cause. No variable was missing.
 - **Open:** `harness/proc-identity.mjs` still reads the process list and start times with `Get-CimInstance`. It works from a studio's normal shell. Moving it to `[wmisearcher]` needs a check that both give the same start time to the millisecond, because locks compare it.
 
-### P-371 — one full rules run was one process that outgrew the machine · fixed 2.95 (as settings)
-- **Evidence:** a live studio, 18 November: 6.7, 14 and 18.9 GB for one full run of its rules tests, on 31.8 GB where a land run needs about 21 GB free. Land runs waited, the owed full run stood in the trains' way, the check ahead could not start. The cause on the game side (every test fixture kept its data for the whole run) was found the same day.
-- **Fix:** `rules.shards` runs a full check one shard at a time with a green kept per shard; `rules.peak` reads the test run's own peak. `qa/selftest-295a.mjs`. Full only with `rest`; the harness cannot check that filter.
-
-### P-372 — a held, queued branch kept getting new porter sessions · fixed 2.95
-- **Evidence:** a live studio: a task whose branch was queued for the engine train and waited for another task (`task after`) was started again and again; each session queued the same branch and the train left it out. A task stays in progress after `task done --train`, and a start on a task in progress skipped the hold.
-- **Fix:** no session is started on it, `task start` refuses it in plain words, and queueing the same branch at the same head changes nothing. `qa/selftest-295d.mjs`.
-
 ### P-373 — git allow-rules for a studio path with a space are not quoted · open (untested)
 - **Evidence:** found while writing `295c`: the `git -C <dir> ...` rules a start builds for agy and for Claude hold the lane's path unquoted. Whether the real tools match them against a quoted path is not known. A studio path without spaces is not affected.
 - **Workaround:** keep the studio in a path without spaces.
-
-### P-374 — nobody had measured what a land run or a shard takes · fixed 2.96 (sampling); a studio's first samples were read on 20 November (2.97)
-- **Evidence:** a live studio, 19 and 20 November: heavy work admitted by slots and fixed claims; a sampler made by hand summed every test process on the machine and blamed the wrong test (11.5 GB); the test run's own per-fixture table showed one fixture at 14.2 GB. The land run waited for 18.8 GB, the size of a test stage it skips when the rules are green.
-- **Fix:** every run's own process tree is sampled; a cost per job kind; `machine.admit: "measured"`. `qa/selftest-296a.mjs`. The first Windows helper (four `Get-CimInstance` queries a sample) wrote no sample at all in the online run: see P-370. It now uses two `[wmisearcher]` queries and no cmdlet; on an online Windows machine it found a 300 MB grandchild, and a sample costs about 0.1 s.
-
-### P-375 — a red rules check re-ran the whole suite at every narrowing step · fixed 2.96
-- **Evidence:** a live studio: 169, 316 and 413 minutes of rules for red batches, 87 to 90 for green ones; a count ratchet cost about 6 hours over two trains; naming two lanes from a failure that names its system took 8 runs.
-- **Fix:** narrowing runs the failing tests only, one whole check decides; `blame` reads the failure's words; ratchets have their own hand-back kind. `qa/selftest-296b.mjs`.
-
-### P-376 — a held lane at the head of the queue set the batch class and took a seat, train after train · fixed 2.96
-- **Evidence:** a live studio: one lane that waited for another task headed four trains in a row; thirteen lanes of the other class waited, one over 30 hours.
-- **Fix:** a held lane is left out before the pick; a lane that cannot go does not decide the batch. `qa/selftest-296c.mjs`.
-
-### P-377 — a batch above `rules.maxLanes` left the land run without a green, silently · fixed 2.96
-- **Evidence:** a live studio: a 7-lane batch with `maxLanes` 6 was checked in two slices, the land run was not told, and the land script ran the whole suite again.
-- **Fix:** the lanes the slices leave are checked once as one tree; `rules show` warns. `qa/selftest-296b.mjs`, `284t`.
-
-### P-378 — upgrades were merged while a train was running, twice from a branch · fixed 2.96
-- **Evidence:** a live studio, 18 November: three upgrades during trains; two took a release branch before its online checks had finished, one 26 minutes after a real fault was fixed on it.
-- **Fix:** `npm run upgrade` refuses while a train runs and says when the ref is not main. `qa/selftest-296e.mjs`.
 
 ### P-379 — a rules green was judged by a lane copy's working files and lost without a word · fixed 2.97
 - **Evidence:** a live studio, 20 November: a train's sharded check was green for four lanes; a porter session then edited the lane copy of one of them; the land run was not told, ran the whole rules stage again (about 50 minutes), and `rules.ahead` started nothing. No line said why. A lane copy is a checkout of the lane's branch, and the land run never sees its uncommitted files.
@@ -139,6 +99,34 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-394 — a session's record could be read half-written, and its name looked free · fixed 2.98
 - **Evidence:** the online run of 2.97 on main, Windows: `293b` "pool" handed a third start the name of a running session. Nine writers rewrote the record in place.
 - **Fix:** one atomic writer and one patch helper; a record that exists but cannot be read counts as busy. `qa/selftest-298h.mjs`. Six other modules still read a record with a plain read.
+
+### P-395 — one red lane cost three land runs and up to four and a half hours · fixed 2.99 (how much re-runs is the studio's setting)
+- **Evidence:** a live studio, 25 and 26 November, three trains of 171 to 279 minutes. One log: a red land run (52 min); the two failing Edit Mode tests run by name without the suspect, after which the run did all of Play Mode (50 min, landing nothing); then the land run without the lane was "not told the rules are green: the batch changed" and ran the whole rules suite itself (105 min). In another train the failing tests were the red lane's own new tests: the by-name filter matched nothing and the studio's land script ran the whole stage (110 min, cancelled).
+- **Fix:** a land group that is part of the checked batch is checked again on its own tree (kept shards reused) and told green; a by-name run gets only the stage its names came from, the names per stage and a time limit (`engines.<x>.byNameMin`, 20); no by-name run when the failing tests are the lane's own new tests. `qa/selftest-299a.mjs`. Shards kept by what they read also count the files no shard takes, so a studio whose art lives outside `rules.ignore` should set `rules.paths`. What a by-name run really runs is the land script's.
+
+### P-396 — an agent's own land run held the only editor slot for two hours · fixed 2.99
+- **Evidence:** "held by unity land (<task>) by engine-porter-... (pid ..., for 21 min)", repeated while a three-lane train waited; the lane held only a merge of the target. The porter's role file told porters to run the engine's gate before `task done`.
+- **Fix:** an agent's own engine run does not start while the engine train runs or lanes wait, is refused on a lane that adds nothing, and (where a train exists) ends at `engines.<x>.agentLandMin` (45) as "not run". The role file names the quick check. `qa/selftest-299b.mjs`. A run already going is not stopped when a train starts to wait.
+
+### P-397 — the check ahead fixed the next train to the few lanes it had checked · fixed 2.99
+- **Evidence:** the overseer kept `rules.ahead` off for two releases: the next train took exactly the checked set and the lanes queued since rode the train after, so batches shrank.
+- **Fix:** with shards kept by reads the next train picks its batch the normal way and reuses the shard greens; without them the checked set is taken only when the normal pick is not larger. `qa/selftest-299b.mjs`. No second pass for lanes queued later.
+
+### P-398 — every mixed batch ran the whole Play Mode stage · fixed 2.99
+- **Evidence:** "play stage in full: 83 changed path(s) match no play.focus.map entry" on every art train (about 50 minutes each). The brief asked for a map; the map has existed since 2.84. The gap: a path that matched `play.focus.skip` counted as unmapped in a batch with other paths.
+- **Fix:** skip paths need no Play Mode of their own; the stage runs the mapped fixtures plus the smoke filter. `engines.<x>.play.times` shows what each fixture and map entry costs. `qa/selftest-299c.mjs`.
+
+### P-399 — a tool the studio had allowed was refused in every session · fixed 2.99 (not confirmed on a real session)
+- **Evidence:** `.studio/denials.jsonl`: the command `"C:/Program Files/.../tool.exe" --version` got the key `Bash(Program *)`, "not on the list", four builder sessions in a row. The studio's entry held the path without quotes; a path with a space is typed in quotes, and the tool matches a rule against the text as typed.
+- **Fix:** one studio entry gives the quoted spellings for the Bash tool and the call-operator spellings for the PowerShell tool; the unquoted rule is gone; an entry can name roles; a denial's key keeps a quoted program whole; the kickoff names the spelling. `qa/selftest-299d.mjs`. See also P-373.
+
+### P-400 — a tag group waited five days, then three of its four lanes were handed back at once · fixed 2.99
+- **Evidence:** tagged 21 November; `tagsWhenIdle` needs an empty untagged queue and the line was never idle. Untagged on 26 November: conflicts with the moved target in two union files and one small JSON file both sides rewrite.
+- **Fix:** `tagMaxWaitHours` (24): an overdue group runs next. `queueRetestHours` (6): waiting lanes are tested against a moved target and handed back early. `merge.newer`: a listed JSON file is taken whole from the side with the later date. `qa/selftest-299e.mjs`.
+
+### P-401 — a session handed back a long list with no code; an ask stayed open after the owner had answered by acting · fixed 2.99
+- **Evidence:** "too big to finish in what this session had left", no commit. An ask about free disk stayed "waiting for the owner" for days after the disk was cleared.
+- **Fix:** the brief shows 8 open items and says one item at a time; the producer is told once to split a list over `task.checklistSplitAt` (8); an ask can carry `--clear-when "disk>=<GB>"`. `qa/selftest-299f.mjs`. An ask made before 2.99 has no condition and stays until it is answered.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
@@ -505,3 +493,13 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **P-364** (fixed 2.93): a queued branch could not be held, marked a slice or closed as a duplicate
 - **P-365** (process): a cleanup removed a folder that other checkouts linked to
 - **P-366** (fixed 2.93): the time-limit wrapper started two processes without the hidden-window option
+- **P-367** (fixed 2.94): the next batch waited unchecked through the whole train before it
+- **P-368** (fixed 2.94): the scorecards called a closed task "landed"
+- **P-369** (fixed 2.94): on Windows the check ahead ended with the train that started it
+- **P-371** (fixed 2.95): one full rules run was one process that outgrew the machine
+- **P-372** (fixed 2.95): a held, queued branch kept getting new porter sessions
+- **P-374** (fixed 2.96): nobody had measured what a land run or a shard takes
+- **P-375** (fixed 2.96): a red rules check re-ran the whole suite at every narrowing step
+- **P-376** (fixed 2.96): a held lane at the head of the queue set the batch class and took a seat, train after train
+- **P-377** (fixed 2.96): a batch above `rules.maxLanes` left the land run without a green, silently
+- **P-378** (fixed 2.96): upgrades were merged while a train was running, twice from a branch
