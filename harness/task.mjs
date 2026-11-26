@@ -975,7 +975,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (!u) return { error: 'unity-gate', message: `${target.id} is not done: the Unity gate didn't report (${`${ug.stderr || ''}${ug.stdout || ''}`.trim().slice(-300) || `exit ${ug.status}`}). node harness/unity-gate.mjs --task ${target.id} runs it.` };
     if (u.status === 'skipped' && !u.notUnity) console.log(`[task done] skipped the Unity gate: ${u.why}`);
     const later = u.status === 'refused' || u.status === 'not-run';
-    if (!u.ok) return { error: later ? 'unity-busy' : 'unity-gate', unity: u, message: `${target.id} is not done: the Unity gate ${u.status === 'refused' ? 'is busy' : u.status === 'not-run' ? 'did not run' : `says ${u.status}`}: ${u.why}${u.tail ? `\n${u.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}\n${later ? 'Run task done again later; nothing is wrong with the work.' : `Fix it and run task done again (node harness/unity-gate.mjs --task ${target.id} runs it; its log: ${u.log || '.studio/gates/out/unity.log'}).`}` };
+    if (!u.ok) return { error: later ? 'unity-busy' : 'unity-gate', unity: u, message: `${target.id} is not done: the Unity gate ${u.status === 'refused' ? 'is busy' : u.status === 'not-run' ? 'did not run' : `says ${u.status}`}: ${u.why}${u.tail ? `\n${u.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}${later ? (u.agentRun || /: the train goes first\./.test(u.why || '') ? '' : '\nRun task done again later; nothing is wrong with the work.') : `\nFix it and run task done again (node harness/unity-gate.mjs --task ${target.id} runs it; its log: ${u.log || '.studio/gates/out/unity.log'}).`}` };
   }
 
   // Forced past a failing check: uncommitted work in the claimed folders is saved as a patch first, so it isn't lost.
@@ -2551,7 +2551,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     let queued = null;
     try { queued = (await import('./unity-train.mjs')).setQueueTag(mainRoot(), arg1, tg, rec.engine); } catch { /* the record is what counts */ }
     emitEvent({ type: 'task.tag', agent: actor(), task: arg1, track: `engine:${rec.engine}`, msg: `${arg1} ${tg ? `is tagged ${tg}: only npm run task -- train --engine ${rec.engine} --tag ${tg} takes its lane` : 'is untagged: a plain engine train takes its lane'}${queued ? ' (queued)' : ''}`, meta: { tag: tg, engine: rec.engine, queued: Boolean(queued) } });
-    console.log(`${arg1} ${tg ? `is tagged ${tg}: only npm run task -- train --engine ${rec.engine} --tag ${tg} takes it; a plain train and the automatic start leave it queued` : 'has no tag: the next plain train (or the automatic start) takes it'}${queued ? '' : ' (not queued yet: task done --train queues it with this tag)'}.`);
+    console.log(`${arg1} ${tg ? `is tagged ${tg}: only npm run task -- train --engine ${rec.engine} --tag ${tg} takes it; a plain train leaves it queued. The automatic start takes the oldest tag group when no untagged lane waits, and a group past engines.${rec.engine}.tagMaxWaitHours (24) runs next` : 'has no tag: the next plain train (or the automatic start) takes it'}${queued ? '' : ' (not queued yet: task done --train queues it with this tag)'}.`);
     process.exit(0);
   }
   if (cmd === 'alone') {
