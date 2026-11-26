@@ -1,7 +1,7 @@
 /**
  * qa/selftest-299f.mjs — 2.99 (f): a session's brief shows the first 8 open checklist items and the way to hand on work
  * in slices; a task over task.checklistSplitAt open items is advised to the producer once (0 = off); a hand-back with no
- * commit and no item done says so.
+ * commit and no item done says so; an ask with --clear-when "disk>=<GB>" closes by itself (cleared), never answered.
  * Scaffolding as qa/selftest-295d.mjs (a studio copy, the real task and ask commands, an injected disk reading).
  */
 import fs from 'node:fs';
@@ -104,6 +104,47 @@ console.log(JSON.stringify({ ok: Boolean(r) }));`);
     await guard('2.99 (f4) a hand-back with no commit and no item done gets one added line naming the first open item; with a commit, with an item done in the session, or when the commit count is unknown it does not (fails before this fix: the next session got no such line)', () => [
       idle(tE1) && /first open item \("Item 1"\)/.test(handoff(tE1)) && !idle(tE2) && !idle(tE3) && !idle(tE4) && handoff(tE1).match(/left no commit/g).length === 1,
       J({ e1: handoff(tE1).slice(-400), e3: handoff(tE3).slice(-200) })]);
+
+    // ---- 3. asks that clear by themselves ----
+    const ASKQ = 'The disk is 43 GB, under the 46.5 GB floor. Please clear the old lane copies.';
+    const r = probe(`import fs from 'node:fs';
+const m = await import(${u('harness/ask.mjs')});
+fs.rmSync(m.ASKS_DIR, { recursive: true, force: true });
+const T0 = Date.parse('2026-11-20T00:00:00.000Z');
+const mk = (o) => m.ask({ by: 'producer-1', now: T0, ...o });
+const owner = mk({ question: ${JSON.stringify(ASKQ)}, clearWhen: 'disk>=50' });
+const plain = mk({ question: 'Which sign colour first?', options: ['red', 'blue'], def: 'red', timeout: '4h', why: 'red reads best', clearWhen: 'disk>=50' });
+const none = mk({ question: 'Which panel first?', options: ['gates', 'shops'], def: 'gates', timeout: '4h', why: 'teaches the flow' });
+const noDef = mk({ question: 'Which shade of grey?' });
+const bad = mk({ question: 'Which font?', clearWhen: 'ram>=4' });
+const before = m.allAsks().length;
+const st = () => Object.fromEntries(m.allAsks().map((a) => [a.id, a.status]));
+const at40 = m.expireAsks(T0 + 3600000, {}, { freeGb: () => 40 });
+const s40 = st();
+const unread = m.expireAsks(T0 + 3600000, {}, { freeGb: () => null });
+const at60 = m.expireAsks(T0 + 3600000, {}, { freeGb: () => 60.04 });
+const s60 = st();
+m.expireAsks(T0 + 3600000, {}, { freeGb: () => 90 });
+const doc = (id) => JSON.parse(fs.readFileSync(m.ASKS_DIR + '/' + id + '.json', 'utf8'));
+const closed = fs.readFileSync(process.env.AGENT_EVENTS_FILE, 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.type === 'ask.closed');
+const plainLate = m.expireAsks(T0 + 5 * 3600000, {}, { freeGb: () => 10 });
+console.log(JSON.stringify({ ids: { owner: owner.ask.id, plain: plain.ask.id, none: none.ask.id, noDef: noDef.ask.id }, bad, before, at40, s40, unread, at60, s60, ownerDoc: doc(owner.ask.id), closed: closed.map((e) => ({ ask: e.meta?.ask, msg: e.msg })), plainLate, sLate: st() }));`);
+    const id = r.ids || {};
+    const A = r.ownerDoc || {};
+    await guard('2.99 (f5) an ask with --clear-when "disk>=50" stays open at 40 GB free (and when the disk cannot be read), and at 60 GB the pass closes it as cleared, not answered, with the words "cleared by itself: free disk is 60 GB (the ask waited for 50 GB)" and one ask.closed event, also when the ask is the owner\'s own (fails before this fix: it waited for an answer or a deadline for good)', () => [
+      r.at40?.length === 0 && r.unread?.length === 0 && r.s40?.[id.owner] === 'open' && r.s40?.[id.plain] === 'open' && r.s60?.[id.owner] === 'cleared' && r.s60?.[id.plain] === 'cleared'
+        && A.status === 'cleared' && A.answer === 'cleared by itself: free disk is 60 GB (the ask waited for 50 GB)' && A.answeredBy === 'harness' && A.clearWhen?.freeDiskGb === 50
+        && r.closed?.length === 2 && r.closed.filter((e) => e.ask === id.owner).length === 1 && /cleared by itself/.test(r.closed[0].msg),
+      J(r)]);
+    const listed = cli('ask.mjs', ['list', '--open']);
+    const made = cli('ask.mjs', ['Is the disk fine now?', '--by', 'producer-1', '--clear-when', 'disk>=70']);
+    const listed2 = cli('ask.mjs', ['list', '--open']);
+    const refused = cli('ask.mjs', ['Which font?', '--by', 'producer-1', '--clear-when', 'ram>=4']);
+    await guard('2.99 (f6) an unknown condition is refused when the ask is made, with the known ones named, and no ask is written; `ask list` shows the condition of an open ask (fails before this fix: the flag did not exist)', () => [
+      r.bad?.ok === false && /disk>=<GB>/.test(r.bad.message || '') && r.before === 4 && refused.status !== 0 && /disk>=<GB>/.test(out(refused)) && made.status === 0 && /clears when disk>=70/.test(listed2.stdout) && !/clears when/.test(listed.stdout),
+      J({ bad: r.bad, before: r.before, refused: out(refused).slice(-300), list: listed2.stdout.slice(-400) })]);
+    await guard('2.99 (f7) an ask without a condition is never closed by the pass before its deadline, whatever the free disk is: the one with a default waits for its 4 h deadline and is then decided by default as before; one with no default stays open (fails before this fix: n/a, guard)', () => [
+      r.s60?.[id.none] === 'open' && r.s60?.[id.noDef] === 'open' && r.sLate?.[id.none] === 'decided' && r.plainLate?.includes(id.none) && r.sLate?.[id.noDef] === 'open', J(r)]);
   } finally {
     try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the OS cleans its temp folder */ }
   }
